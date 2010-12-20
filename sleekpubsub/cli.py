@@ -2,6 +2,7 @@ import Queue
 from pubsub import ACL, Interface, NodeExists
 import threading
 import traceback
+import sys
 
 class CLInterface(Interface):
     name = "CLI"
@@ -18,6 +19,8 @@ class CLInterface(Interface):
                 cmd = raw_input(">")
                 if cmd == 'quit':
                     break
+                elif cmd.strip() == "":
+                    continue
                 if len(cmd.split()) > 1:
                     args = cmd.split()[1:]
                 else:
@@ -52,5 +55,11 @@ class CLInterface(Interface):
 
     def retract_notice(self, node, id):
         print "retract: %s[%s]" % (node, id)
+
+    def create_notice(self, node):
+        print "created: %s" % node
+
+    def delete_notice(self, node):
+        print "deleted: %s" % node
 
 

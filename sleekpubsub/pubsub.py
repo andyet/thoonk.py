@@ -59,9 +59,12 @@ class Pubsub(object):
         self.redis.publish(NEWNODE, name)
 
     def delete_node(self, name):
-        if not self.redis.sadd("nodes", name):
-            raise NodeExists
-        self.nodes.add(name)
+        pipe = self.redis.pipeline()
+        pipe.srem("nodes", name)
+        pipe.delete([node_schema % name for node_schema in (NODEITEMS, NODEIDS, NODEPUB, NODERETRACT)])
+        if not pipe.execute()[0]:
+            raise NodeDoesNotExist
+        self.nodes.remove(name)
         self.redis.publish(DELNODE, name)
     
     def publish(self, node, item, id=None):
@@ -121,11 +124,25 @@ class Pubsub(object):
                     self.nodes.add(event['data'])
                     lredis.subscribe([NODEPUB % event['data']])
                     lredis.subscribe([NODERETRACT % event['data']])
+                    self.create_notice(event['data'])
                 elif event['channel'] == DELNODE:
                     #node destroyed event
-                    self.nodes.remove(event['data'])
+                    try:
+                        self.nodes.remove(event['data'])
+                    except KeyError:
+                        #already removed -- probably locally
+                        pass
                     lredis.unsubscribe([NODEPUB % event['data']])
                     lredis.unsubscribe([NODERETRACT % event['data']])
+                    self.delete_notice(event['data'])
+    
+    def create_notice(self, node):
+        for ifname in self.interface:
+            self.interface[ifname].create_notice(node)
+
+    def delete_notice(self, node):
+        for ifname in self.interface:
+            self.interface[ifname].delete_notice(node)
 
     def publish_notice(self, node, item, id):
         for ifname in self.interface:
@@ -153,4 +170,10 @@ class Interface(object):
         pass
 
     def retract_notice(self, node, id):
+        pass
+
+    def create_notice(self, node):
+        pass
+
+    def delete_notice(self, node):
         pass
