@@ -1,11 +1,15 @@
 import redis
 import threading
 import uuid
+from node import LeafNode
 
 NODEIDS = "node.ids:%s"
 NODEITEMS = "node.items:%s"
 NODEPUB = "node.publish:%s"
 NODERETRACT = "node.retract:%s"
+NODECONFIG = "node.config:%s"
+NODECONFIGKEY = "node.config.%s:%s"
+NODECONFIGUPDATE = "node.updateconfig"
 NEWNODE = "newnode"
 DELNODE = "delnode"
 
@@ -41,12 +45,18 @@ class Pubsub(object):
     def __init__(self):
         self.redis = redis.Redis(host='localhost', port=6379, db=0)
         self.interface = {}
-
+        self.nodetypes = {}
+        self.nodeconfig = {}
+        
+        self.register_nodetype('leaf', LeafNode)
 
         #start listener thread
         self.lthread = threading.Thread(target = self.listen)
         self.lthread.daemon = True
         self.lthread.start()
+
+    def register_nodetype(self, nodetype, klass):
+        self.nodetypes[nodetype] = klass
 
     def register_interface(self, interface):
         self.interface[interface.name] = interface
@@ -57,15 +67,34 @@ class Pubsub(object):
             raise NodeExists
         self.nodes.add(name)
         self.redis.publish(NEWNODE, name)
+        self.update_nodeconfig(name, config)
+
+    def update_nodeconfig(self, node, config):
+        if not self.node_exists(node):
+            raise NodeDoesNotExist
+        pipe = self.redis.pipeline()
+        if 'type' not in config:
+            config['type'] = 'leaf'
+        for key in config:
+            pipe.set(NODECONFIGKEY % (key, node), config[key])
+            pipe.sadd(NODECONFIG % node, key)
+        pipe.execute()
+        self.redis.publish(NODECONFIGUPDATE, node)
 
     def delete_node(self, name):
+        if not self.node_exists(name):
+            raise NodeDoesNotExist
+        configs = self.redis.smembers(NODECONFIG % name)
         pipe = self.redis.pipeline()
         pipe.srem("nodes", name)
+        pipe.delete([NODECONFIGKEY % (key, name) for key in configs])
         pipe.delete([node_schema % name for node_schema in (NODEITEMS, NODEIDS, NODEPUB, NODERETRACT)])
-        if not pipe.execute()[0]:
-            raise NodeDoesNotExist
+        pipe.execute()
         self.nodes.remove(name)
         self.redis.publish(DELNODE, name)
+
+    def get_nodes(self):
+        return self.nodes
     
     def publish(self, node, item, id=None):
         if not self.node_exists(node):
@@ -97,18 +126,18 @@ class Pubsub(object):
         return self.redis.sismember('nodes', node)
 
     def listen(self):
-        #get set of nodes
-        self.nodes = self.redis.smembers('nodes')
-
         #listener redis object
         lredis = redis.Redis(host='localhost', port=6379, db=0)
 
+        # subscribe to node activities channel
+        lredis.subscribe((NEWNODE, DELNODE, NODECONFIGUPDATE))
+
+        #get set of nodes
+        self.nodes = self.redis.smembers('nodes')
         if self.nodes:
             # subscribe to exist nodes retract and publish
             lredis.subscribe([NODEPUB % node for node in self.nodes])
             lredis.subscribe([NODERETRACT % node for node in self.nodes])
-        # subscribe to node activities channel
-        lredis.subscribe((NEWNODE, DELNODE))
 
         for event in lredis.listen():
             if event['type'] == 'message':
@@ -135,6 +164,9 @@ class Pubsub(object):
                     lredis.unsubscribe([NODEPUB % event['data']])
                     lredis.unsubscribe([NODERETRACT % event['data']])
                     self.delete_notice(event['data'])
+                elif event['channel'] == NODECONFIGUPDATE:
+                    if event['data'] in self.nodeconfig:
+                        del self.nodeconfig[event['data']]
     
     def create_notice(self, node):
         for ifname in self.interface:
