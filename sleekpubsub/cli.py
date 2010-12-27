@@ -53,6 +53,17 @@ class CLInterface(Interface):
     def cmd_nodes(self, *args):
         print self.pubsub.get_nodes()
 
+    def cmd_items(self, *args):
+        print self.pubsub.get_items(args[0])
+
+    def cmd_item(self, *args):
+        if len(args) == 1:
+            args.append(None)
+        print self.pubsub.get_item(args[0], args[1])
+
+    def cmd_retract(self, *args):
+        print self.pubsub.retract(args[0], args[1])
+
     def publish_notice(self, node, item, id):
         print "publish: %s[%s]: %s" % (node, id, item)
 

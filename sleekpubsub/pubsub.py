@@ -62,12 +62,12 @@ class Pubsub(object):
         self.interface[interface.name] = interface
         interface.register(self)
 
-    def create_node(self, name, config):
-        if not self.redis.sadd("nodes", name):
+    def create_node(self, node, config):
+        if not self.redis.sadd("nodes", node):
             raise NodeExists
-        self.nodes.add(name)
-        self.redis.publish(NEWNODE, name)
-        self.update_nodeconfig(name, config)
+        self.nodes.add(node)
+        self.redis.publish(NEWNODE, node)
+        self.update_nodeconfig(node, config)
 
     def update_nodeconfig(self, node, config):
         if not self.node_exists(node):
@@ -81,21 +81,37 @@ class Pubsub(object):
         pipe.execute()
         self.redis.publish(NODECONFIGUPDATE, node)
 
-    def delete_node(self, name):
-        if not self.node_exists(name):
+    def delete_node(self, node):
+        if not self.node_exists(node):
             raise NodeDoesNotExist
-        configs = self.redis.smembers(NODECONFIG % name)
+        configs = self.redis.smembers(NODECONFIG % node)
         pipe = self.redis.pipeline()
-        pipe.srem("nodes", name)
-        pipe.delete([NODECONFIGKEY % (key, name) for key in configs])
-        pipe.delete([node_schema % name for node_schema in (NODEITEMS, NODEIDS, NODEPUB, NODERETRACT)])
+        pipe.srem("nodes", node)
+        pipe.delete([NODECONFIGKEY % (key, node) for key in configs])
+        pipe.delete([node_schema % node for node_schema in (NODEITEMS, NODEIDS, NODEPUB, NODERETRACT)])
         pipe.execute()
-        self.nodes.remove(name)
-        self.redis.publish(DELNODE, name)
+        self.nodes.remove(node)
+        self.redis.publish(DELNODE, node)
+
+    def get_nodeconfig(self, node):
+        pass
 
     def get_nodes(self):
         return self.nodes
     
+    def get_items(self, node):
+        if not self.node_exists(node):
+            raise NodeDoesNotExist
+        return self.redis.lrange(NODEIDS % node, 0, -1)
+
+    def get_item(self, node, item=None):
+        if not self.node_exists(node):
+            raise NodeDoesNotExist
+        if item is None:
+            self.redis.hget(NODEITEMS % node, self.redis.lindex(NODEIDS % node, 0))
+        else:
+            return self.redis.hget(NODEITEMS % node, item)
+
     def publish(self, node, item, id=None):
         if not self.node_exists(node):
             raise NodeDoesNotExist
@@ -119,8 +135,9 @@ class Pubsub(object):
             raise ItemDoesNotExist
         pipe.lrem(NODEIDS % node, id, num=1)
         pipe.hdel(NODEITEMS % node, id)
-        print pipe.execute()
+        result = pipe.execute()
         self.redis.publish(NODERETRACT % node, id)
+        return result
 
     def node_exists(self, node):
         return self.redis.sismember('nodes', node)
