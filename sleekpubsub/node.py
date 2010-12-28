@@ -33,7 +33,7 @@ class LeafNode(object):
         #each condition has the same lpush, but I want to avoid
         #running the second condition if I can
         elif not self.redis.hexists(NODEITEMS % node, id):
-            pipe.lpush(self.NODEIDS % node, id)
+            pipe.lpush(NODEIDS % node, id)
         pipe.hset(NODEITEMS % node, id, item)
         pipe.execute()
         self.redis.publish(NODEPUB % node, "%s@%s" % (id, item))
