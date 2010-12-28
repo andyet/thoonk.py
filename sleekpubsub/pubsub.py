@@ -1,17 +1,9 @@
 import redis
 import threading
 import uuid
+import json
 from node import LeafNode
-
-NODEIDS = "node.ids:%s"
-NODEITEMS = "node.items:%s"
-NODEPUB = "node.publish:%s"
-NODERETRACT = "node.retract:%s"
-NODECONFIG = "node.config:%s"
-NODECONFIGKEY = "node.config.%s:%s"
-NODECONFIGUPDATE = "node.updateconfig"
-NEWNODE = "newnode"
-DELNODE = "delnode"
+from consts import *
 
 class NodeExists(Exception):
     pass
@@ -41,14 +33,68 @@ class ACL(object):
     def subscribe(self, ident, node, id):
         return True
 
+class ConfigCache(object):
+    def __init__(self, pubsub):
+        self._nodes = {}
+        self.pubsub = pubsub
+        self.lock = threading.Lock()
+        self.instance = uuid.uuid4().hex
+
+    def __getitem__(self, node):
+        if node in self._nodes:
+            return self._nodes[node]
+        else:
+            with self.lock:
+                if not self.pubsub.node_exists(node):
+                    raise NodeDoesNotExist
+                self._nodes[node] = json.loads(self.pubsub.redis.get(NODECONFIG % node))
+                return self._nodes[node]
+
+    def __setitem__(self, node, config):
+        with self.lock:
+            if not self.pubsub.node_exists(node):
+                raise NodeDoesNotExist
+            if type(config) == dict:
+                if u'type' not in config:
+                    config[u'type'] = u'leaf'
+                jconfig = json.dumps(config)
+                dconfig = config
+            else:
+                dconfig = json.loads(config)
+                if u'type' not in dconfig:
+                    dconfig[u'type'] = u'leaf'
+                jconfig = json.dumps(dconfig)
+            self._nodes[node] = dconfig
+            self.pubsub.redis.set(NODECONFIG % node, jconfig)
+            self.pubsub.redis.publish(CONFNODE, "%s\x00%s" % (node, self.instance))
+
+    def invalidate(self, data):
+        node, instance = data.split("\x00")
+        if instance != self.instance:
+            with self.lock:
+                if node in self._nodes:
+                    del self._nodes[node]
+
+class NodeMap(object):
+    def __init__(self, pubsub):
+        self._pubsub = pubsub
+
+    def __getitem__(self, node):
+        if not self._pubsub.node_exists(node):
+            raise NodeDoesNotExist
+        return self._pubsub.nodetypes[self._pubsub.nodeconfig[node].get(u'type', u'leaf')]
+
+
 class Pubsub(object):
     def __init__(self):
         self.redis = redis.Redis(host='localhost', port=6379, db=0)
         self.interface = {}
         self.nodetypes = {}
-        self.nodeconfig = {}
+        self.nodes = set()
+        self.nodeconfig = ConfigCache(self)
+        self.nodemap = NodeMap(self)
         
-        self.register_nodetype('leaf', LeafNode)
+        self.register_nodetype(u'leaf', LeafNode)
 
         #start listener thread
         self.lthread = threading.Thread(target = self.listen)
@@ -56,7 +102,7 @@ class Pubsub(object):
         self.lthread.start()
 
     def register_nodetype(self, nodetype, klass):
-        self.nodetypes[nodetype] = klass
+        self.nodetypes[nodetype] = klass(self)
 
     def register_interface(self, interface):
         self.interface[interface.name] = interface
@@ -72,85 +118,45 @@ class Pubsub(object):
     def update_nodeconfig(self, node, config):
         if not self.node_exists(node):
             raise NodeDoesNotExist
-        pipe = self.redis.pipeline()
-        if 'type' not in config:
-            config['type'] = 'leaf'
-        for key in config:
-            pipe.set(NODECONFIGKEY % (key, node), config[key])
-            pipe.sadd(NODECONFIG % node, key)
-        pipe.execute()
-        self.redis.publish(NODECONFIGUPDATE, node)
+        self.nodeconfig[node] = config
 
     def delete_node(self, node):
-        if not self.node_exists(node):
-            raise NodeDoesNotExist
-        configs = self.redis.smembers(NODECONFIG % node)
-        pipe = self.redis.pipeline()
-        pipe.srem("nodes", node)
-        pipe.delete([NODECONFIGKEY % (key, node) for key in configs])
-        pipe.delete([node_schema % node for node_schema in (NODEITEMS, NODEIDS, NODEPUB, NODERETRACT)])
-        pipe.execute()
-        self.nodes.remove(node)
-        self.redis.publish(DELNODE, node)
+        self.nodemap[node].delete_node(node)
 
     def get_nodeconfig(self, node):
-        pass
+        if not self.node_exists(node):
+            raise NodeDoesNotExist
+        return self.nodeconfig[node]
 
     def get_nodes(self):
         return self.nodes
     
     def get_items(self, node):
-        if not self.node_exists(node):
-            raise NodeDoesNotExist
-        return self.redis.lrange(NODEIDS % node, 0, -1)
+        return self.nodemap[node].get_items(node)
 
     def get_item(self, node, item=None):
-        if not self.node_exists(node):
-            raise NodeDoesNotExist
-        if item is None:
-            self.redis.hget(NODEITEMS % node, self.redis.lindex(NODEIDS % node, 0))
-        else:
-            return self.redis.hget(NODEITEMS % node, item)
+        return self.nodemap[node].get_item(node, item)
 
     def publish(self, node, item, id=None):
-        if not self.node_exists(node):
-            raise NodeDoesNotExist
-        pipe = self.redis.pipeline()
-        if id is None:
-            id = uuid.uuid4().hex
-            pipe.lpush(NODEIDS % node, id)
-        #each condition has the same lpush, but I want to avoid
-        #running the second condition if I can
-        elif not self.redis.hexists(NODEITEMS % node, id):
-            pipe.lpush(self.NODEIDS % node, id)
-        pipe.hset(NODEITEMS % node, id, item)
-        pipe.execute()
-        self.redis.publish(NODEPUB % node, "%s@%s" % (id, item))
+        return self.nodemap[node].publish(node, item, id)
 
     def retract(self, node, id):
-        if not self.node_exists(node):
-            raise NodeDoesNotExist
-        pipe = self.redis.pipeline()
-        if not self.redis.hexists(NODEITEMS % node, id):
-            raise ItemDoesNotExist
-        pipe.lrem(NODEIDS % node, id, num=1)
-        pipe.hdel(NODEITEMS % node, id)
-        result = pipe.execute()
-        self.redis.publish(NODERETRACT % node, id)
-        return result
+        return self.nodemap[node].retract(node, id)
 
     def node_exists(self, node):
-        return self.redis.sismember('nodes', node)
+        return node in self.nodes
+        #extra sure way.... worth it?
+        #return self.redis.sismember('nodes', node)
 
     def listen(self):
         #listener redis object
         lredis = redis.Redis(host='localhost', port=6379, db=0)
 
         # subscribe to node activities channel
-        lredis.subscribe((NEWNODE, DELNODE, NODECONFIGUPDATE))
+        lredis.subscribe((NEWNODE, DELNODE, CONFNODE))
 
         #get set of nodes
-        self.nodes = self.redis.smembers('nodes')
+        self.nodes.update(self.redis.smembers('nodes'))
         if self.nodes:
             # subscribe to exist nodes retract and publish
             lredis.subscribe([NODEPUB % node for node in self.nodes])
@@ -166,7 +172,6 @@ class Pubsub(object):
                     self.retract_notice(event['channel'].split(':', 1)[-1], event['data'])
                 elif event['channel'] == NEWNODE:
                     #node created event
-                    print "new node: %s" % event['data']
                     self.nodes.add(event['data'])
                     lredis.subscribe([NODEPUB % event['data']])
                     lredis.subscribe([NODERETRACT % event['data']])
@@ -181,9 +186,8 @@ class Pubsub(object):
                     lredis.unsubscribe([NODEPUB % event['data']])
                     lredis.unsubscribe([NODERETRACT % event['data']])
                     self.delete_notice(event['data'])
-                elif event['channel'] == NODECONFIGUPDATE:
-                    if event['data'] in self.nodeconfig:
-                        del self.nodeconfig[event['data']]
+                elif event['channel'] == CONFNODE:
+                    self.nodeconfig.invalidate(event['data'])
     
     def create_notice(self, node):
         for ifname in self.interface:

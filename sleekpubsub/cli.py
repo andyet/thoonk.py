@@ -64,6 +64,15 @@ class CLInterface(Interface):
     def cmd_retract(self, *args):
         print self.pubsub.retract(args[0], args[1])
 
+    def cmd_getconfig(self, *args):
+        print self.pubsub.nodeconfig[args[0]]
+
+    def cmd_setconfig(self, *args):
+        node = args[0]
+        config = ' '.join(args[1:])
+        self.pubsub.nodeconfig[node] = config
+        print "Ok."
+
     def publish_notice(self, node, item, id):
         print "publish: %s[%s]: %s" % (node, id, item)
 
