@@ -36,7 +36,8 @@ class LeafNode(object):
             pipe.lpush(NODEIDS % node, id)
         pipe.hset(NODEITEMS % node, id, item)
         pipe.execute()
-        self.redis.publish(NODEPUB % node, "%s@%s" % (id, item))
+        self.redis.publish(NODEPUB % node, "%s\x00%s" % (id, item))
+        return id
 
     def retract(self, node, id):
         pipe = self.redis.pipeline()
@@ -47,3 +48,61 @@ class LeafNode(object):
         result = pipe.execute()
         self.redis.publish(NODERETRACT % node, id)
         return result
+
+class QueueNode(LeafNode):
+    
+    def publish(self, node, item):
+        pipe = self.redis.pipeline()
+        id = uuid.uuid4().hex
+        pipe.lpush(NODEIDS % node, id)
+        pipe.hset(NODEITEMS % node, id, item)
+        pipe.execute()
+        self._publish_number(self, node)
+        return id
+
+    def get(self, node, timeout=60):
+        id = self.redis.brpop(NODEIDS % node, timeout)
+        value = self.redis.hget(NODEITEMS % node, id)
+        self.redis.hdel(NODEITEMS % node, id)
+        return id, value
+
+    def _publish_number(self, node):
+        #indicates that the length of NODEIDS has changed
+        self.redis.publish(NODEPUB % node, "x")
+
+class JobNode(QueueNode):
+
+    def get(self, node, timeout=60):
+        id = self.redis.brpoplpush(NODEIDS % node, NODEJOBPENDING % node, timeout)
+        value = self.redis.hget(NODEITEMS % node, id)
+        self._publish_number(node)
+        return id, value
+
+    def finish(self, node, id, value):
+        self.retract(node, id)
+        self._publish_number(node)
+        self.redis.publish(NODEJOBFINISHED % node, "%s\x00%s" % (id, value))
+
+    def cancel(self, node, id):
+        self._check_pending(node, id)
+        pipe = self.redis.pipeline()
+        pipe.lrem(NODEJOBPENDING % node, id, num=1)
+        pipe.rpush(NODEIDS % node, id)
+        pipe.execute()
+        self._publish_number(node)
+
+    def stall(self, node, id):
+        self._check_pending(node, id)
+        pipe = self.redis.pipeline()
+        pipe.lrem(NODEIDS % node, id, num=1)
+        pipe.rpush(NODEIDS % node, id)
+        pipe.execute()
+
+    def restore(self, node, id):
+        self._check_stalled(node, id)
+        pipe = self.redis.pipeline()
+        pipe.lrem(NODEJOBSTALL % node, id, num=1)
+        pipe.rpush(NODEIDS % node, id)
+        pipe.execute()
+        self._publish_number(node)
+

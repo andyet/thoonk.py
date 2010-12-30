@@ -166,7 +166,7 @@ class Pubsub(object):
             if event['type'] == 'message':
                 if event['channel'].startswith('node.publish'):
                     #node publish event
-                    id, item = event['data'].split('@', 1)
+                    id, item = event['data'].split('\x00', 1)
                     self.publish_notice(event['channel'].split(':', 1)[-1], item, id)
                 elif event['channel'].startswith('node.retract'):
                     self.retract_notice(event['channel'].split(':', 1)[-1], event['data'])
@@ -175,6 +175,8 @@ class Pubsub(object):
                     self.nodes.add(event['data'])
                     lredis.subscribe([NODEPUB % event['data']])
                     lredis.subscribe([NODERETRACT % event['data']])
+                    lredis.subscribe([NODEJOBSTALLED % event['data']])
+                    lredis.subscribe([NODEJOBFINISHED % event['data']])
                     self.create_notice(event['data'])
                 elif event['channel'] == DELNODE:
                     #node destroyed event
@@ -185,6 +187,9 @@ class Pubsub(object):
                         pass
                     lredis.unsubscribe([NODEPUB % event['data']])
                     lredis.unsubscribe([NODERETRACT % event['data']])
+                    lredis.unsubscribe([NODEJOBSTALLED % event['data']])
+                    lredis.unsubscribe([NODEJOBFINISHED % event['data']])
+                    self.nodeconfig.invalidate(event['data'])
                     self.delete_notice(event['data'])
                 elif event['channel'] == CONFNODE:
                     self.nodeconfig.invalidate(event['data'])
