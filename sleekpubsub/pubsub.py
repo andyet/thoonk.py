@@ -86,8 +86,12 @@ class NodeMap(object):
 
 
 class Pubsub(object):
-    def __init__(self):
-        self.redis = redis.Redis(host='localhost', port=6379, db=0)
+    def __init__(self, allnodes=True, host='localhost', port=6379, db=0):
+        self.allnodes = allnodes
+        self.host = host
+        self.port = port
+        self.db = db
+        self.redis = redis.Redis(host=self.host, port=self.port, db=self.db)
         self.interface = {}
         self.nodetypes = {}
         self.nodes = set()
@@ -112,8 +116,8 @@ class Pubsub(object):
         if not self.redis.sadd("nodes", node):
             raise NodeExists
         self.nodes.add(node)
-        self.redis.publish(NEWNODE, node)
         self.update_nodeconfig(node, config)
+        self.redis.publish(NEWNODE, node)
 
     def update_nodeconfig(self, node, config):
         if not self.node_exists(node):
@@ -150,7 +154,7 @@ class Pubsub(object):
 
     def listen(self):
         #listener redis object
-        lredis = redis.Redis(host='localhost', port=6379, db=0)
+        lredis = redis.Redis(host=self.host, port=self.port, db=self.db)
 
         # subscribe to node activities channel
         lredis.subscribe((NEWNODE, DELNODE, CONFNODE))
