@@ -2,7 +2,7 @@ import redis
 import threading
 import uuid
 import json
-from node import LeafNode
+from node import LeafNode, QueueNode, JobNode
 from consts import *
 
 class NodeExists(Exception):

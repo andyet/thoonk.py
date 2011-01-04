@@ -4,6 +4,8 @@ NODEPUB = "node.publish:%s"
 NODERETRACT = "node.retract:%s"
 NODECONFIG = "node.config:%s"
 
+NODEJOBSTALLED = "node.stalled:%s"
+NODEJOBFINISHED = "node.finished:%s"
 
 CONFNODE = "confnode"
 NEWNODE = "newnode"
