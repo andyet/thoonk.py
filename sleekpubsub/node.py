@@ -79,7 +79,10 @@ class JobNode(QueueNode):
         return id, value
 
     def finish(self, node, id, value):
-        self.retract(node, id)
+        #TODO: should pipe
+        self._check_pending(node, id)
+        self.redis.lrem(NODEIDS % node, id, num=1)
+        self.redis.hdel(NODEITEMS % node, id)
         self._publish_number(node)
         self.redis.publish(NODEJOBFINISHED % node, "%s\x00%s" % (id, value))
 

@@ -99,6 +99,8 @@ class Pubsub(object):
         self.nodemap = NodeMap(self)
         
         self.register_nodetype(u'leaf', LeafNode)
+        self.register_nodetype(u'queue', QueueNode)
+        self.register_nodetype(u'job', JobNode)
 
         #start listener thread
         self.lthread = threading.Thread(target = self.listen)
