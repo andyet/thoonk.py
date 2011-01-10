@@ -51,7 +51,7 @@ class ConfigCache(object):
                         del self._nodes[node].config
 
 class Pubsub(object):
-    def __init__(self, allnodes=True, host='localhost', port=6379, db=0):
+    def __init__(self, allnodes=True, host='localhost', port=6379, db=0, listen=False):
         self.allnodes = allnodes
         self.host = host
         self.port = port
@@ -66,10 +66,11 @@ class Pubsub(object):
         self.register_nodetype(u'queue', nodes.Queue)
         self.register_nodetype(u'job', nodes.Job)
 
-        #start listener thread
-        self.lthread = threading.Thread(target=self.listen)
-        self.lthread.daemon = True
-        self.lthread.start()
+        if listen:
+            #start listener thread
+            self.lthread = threading.Thread(target=self.listen)
+            self.lthread.daemon = True
+            self.lthread.start()
 
     def __getitem__(self, node):
         return self.nodeconfig[node]

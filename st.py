@@ -6,10 +6,10 @@ import time
 
 def testspeed(total=40000):
     p = Pubsub()
-    p.create_node("speed", {})
+    n = p.leaf("speed")
     start = time.time()
     for x in range(1,total):
-        p.publish("speed", x, x)
+        n.publish(x, x)
     tt = time.time() - start
     print tt, total / tt
 

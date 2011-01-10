@@ -42,35 +42,35 @@ class CLInterface(Interface):
             print "Node already exists"
 
     def cmd_publish(self, *args):
-        self.pubsub.publish(args[0], " ".join(args[1:]))
+        self.pubsub[args[0]].publish(" ".join(args[1:]))
 
     def cmd_delete(self, *args):
         self.pubsub.delete_node(args[0])
 
     def cmd_retract(self, *args):
-        self.pubsub.retract(*args)
+        self.pubsub[args[0]].retract(args[1])
 
     def cmd_nodes(self, *args):
         print self.pubsub.get_nodes()
 
     def cmd_items(self, *args):
-        print self.pubsub.get_items(args[0])
+        print self.pubsub[args[0]].get_items()
 
     def cmd_item(self, *args):
         if len(args) == 1:
             args.append(None)
-        print self.pubsub.get_item(args[0], args[1])
+        print self.pubsub[args[0]].get_item(args[1])
 
     def cmd_retract(self, *args):
-        print self.pubsub.retract(args[0], args[1])
+        print self.pubsub[args[0]].retract(args[1])
 
     def cmd_getconfig(self, *args):
-        print self.pubsub.nodeconfig[args[0]]
+        print self.pubsub[args[0]].config
 
     def cmd_setconfig(self, *args):
         node = args[0]
         config = ' '.join(args[1:])
-        self.pubsub.nodeconfig[node] = config
+        self.pubsub[node].config = config
         print "Ok."
 
     def publish_notice(self, node, item, id):
