@@ -2,20 +2,9 @@ import redis
 import threading
 import uuid
 import json
-from node import LeafNode, QueueNode, JobNode
+import nodes
 from consts import *
-
-class NodeExists(Exception):
-    pass
-
-class NotAllowed(Exception):
-    pass
-
-class NodeDoesNotExist(Exception):
-    pass
-
-class ItemDoesNotExist(Exception):
-    pass
+from exceptions import *
 
 class ACL(object):
     def can_publish(self, ident, node, item, id):
@@ -47,43 +36,19 @@ class ConfigCache(object):
             with self.lock:
                 if not self.pubsub.node_exists(node):
                     raise NodeDoesNotExist
-                self._nodes[node] = json.loads(self.pubsub.redis.get(NODECONFIG % node))
+                config = json.loads(self.pubsub.redis.get(NODECONFIG % node))
+                self._nodes[node] = self.pubsub.nodetypes[config.get(u'type', u'leaf')](self.pubsub, node, config)
                 return self._nodes[node]
 
-    def __setitem__(self, node, config):
-        with self.lock:
-            if not self.pubsub.node_exists(node):
-                raise NodeDoesNotExist
-            if type(config) == dict:
-                if u'type' not in config:
-                    config[u'type'] = u'leaf'
-                jconfig = json.dumps(config)
-                dconfig = config
-            else:
-                dconfig = json.loads(config)
-                if u'type' not in dconfig:
-                    dconfig[u'type'] = u'leaf'
-                jconfig = json.dumps(dconfig)
-            self._nodes[node] = dconfig
-            self.pubsub.redis.set(NODECONFIG % node, jconfig)
-            self.pubsub.redis.publish(CONFNODE, "%s\x00%s" % (node, self.instance))
-
-    def invalidate(self, data):
+    def invalidate(self, data, delete=False):
         node, instance = data.split("\x00")
         if instance != self.instance:
             with self.lock:
                 if node in self._nodes:
-                    del self._nodes[node]
-
-class NodeMap(object):
-    def __init__(self, pubsub):
-        self._pubsub = pubsub
-
-    def __getitem__(self, node):
-        if not self._pubsub.node_exists(node):
-            raise NodeDoesNotExist
-        return self._pubsub.nodetypes[self._pubsub.nodeconfig[node].get(u'type', u'leaf')]
-
+                    if delete:
+                        del self._nodes[node]
+                    else:
+                        del self._nodes[node].config
 
 class Pubsub(object):
     def __init__(self, allnodes=True, host='localhost', port=6379, db=0):
@@ -96,63 +61,69 @@ class Pubsub(object):
         self.nodetypes = {}
         self.nodes = set()
         self.nodeconfig = ConfigCache(self)
-        self.nodemap = NodeMap(self)
         
-        self.register_nodetype(u'leaf', LeafNode)
-        self.register_nodetype(u'queue', QueueNode)
-        self.register_nodetype(u'job', JobNode)
+        self.register_nodetype(u'leaf', nodes.Leaf)
+        self.register_nodetype(u'queue', nodes.Queue)
+        self.register_nodetype(u'job', nodes.Job)
 
         #start listener thread
-        self.lthread = threading.Thread(target = self.listen)
+        self.lthread = threading.Thread(target=self.listen)
         self.lthread.daemon = True
         self.lthread.start()
 
+    def __getitem__(self, node):
+        return self.nodeconfig[node]
+
     def register_nodetype(self, nodetype, klass):
-        self.nodetypes[nodetype] = klass(self)
+        self.nodetypes[nodetype] = klass
+        def startclass(node, config={}):
+            if self.node_exists(node):
+                return self[node]
+            else:
+                if not config.get('type', False):
+                    config['type'] = nodetype
+                return self.create_node(node, config, True)
+        setattr(self, nodetype, startclass)
 
     def register_interface(self, interface):
         self.interface[interface.name] = interface
         interface.register(self)
 
-    def create_node(self, node, config):
+    def create_node(self, node, config, returnnode=False):
         if not self.redis.sadd("nodes", node):
             raise NodeExists
         self.nodes.add(node)
-        self.update_nodeconfig(node, config)
+        print "cn", config
+        self.set_node_config(node, config)
         self.redis.publish(NEWNODE, node)
+        if returnnode:
+            return self[node]
 
-    def update_nodeconfig(self, node, config):
+    def set_node_config (self, node, config):
+        print "nc", config
         if not self.node_exists(node):
             raise NodeDoesNotExist
-        self.nodeconfig[node] = config
-
-    def delete_node(self, node):
-        self.nodemap[node].delete_node(node)
-
-    def get_nodeconfig(self, node):
-        if not self.node_exists(node):
-            raise NodeDoesNotExist
-        return self.nodeconfig[node]
+        if type(config) == dict:
+            if u'type' not in config:
+                config[u'type'] = u'leaf'
+            jconfig = json.dumps(config)
+            dconfig = config
+        else:
+            dconfig = json.loads(config)
+            if u'type' not in dconfig:
+                dconfig[u'type'] = u'leaf'
+            jconfig = json.dumps(dconfig)
+        self._config = dconfig
+        self.redis.set(NODECONFIG % node, jconfig)
+        self.redis.publish(CONFNODE, "%s\x00%s" % (node, self.nodeconfig.instance))
 
     def get_nodes(self):
         return self.nodes
     
-    def get_items(self, node):
-        return self.nodemap[node].get_items(node)
-
-    def get_item(self, node, item=None):
-        return self.nodemap[node].get_item(node, item)
-
-    def publish(self, node, item, id=None):
-        return self.nodemap[node].publish(node, item, id)
-
-    def retract(self, node, id):
-        return self.nodemap[node].retract(node, id)
-
-    def node_exists(self, node):
-        return node in self.nodes
+    def node_exists(self, node, check=False):
+        return self.redis.sismember('nodes', node)
+            #return node in self.nodes
         #extra sure way.... worth it?
-        #return self.redis.sismember('nodes', node)
 
     def listen(self):
         #listener redis object
@@ -195,7 +166,7 @@ class Pubsub(object):
                     lredis.unsubscribe([NODERETRACT % event['data']])
                     lredis.unsubscribe([NODEJOBSTALLED % event['data']])
                     lredis.unsubscribe([NODEJOBFINISHED % event['data']])
-                    self.nodeconfig.invalidate(event['data'])
+                    self.nodeconfig.invalidate(event['data'], delete=True)
                     self.delete_notice(event['data'])
                 elif event['channel'] == CONFNODE:
                     self.nodeconfig.invalidate(event['data'])
