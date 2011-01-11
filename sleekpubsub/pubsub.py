@@ -94,14 +94,12 @@ class Pubsub(object):
         if not self.redis.sadd("nodes", node):
             raise NodeExists
         self.nodes.add(node)
-        print "cn", config
         self.set_node_config(node, config)
         self.redis.publish(NEWNODE, node)
         if returnnode:
             return self[node]
 
     def set_node_config (self, node, config):
-        print "nc", config
         if not self.node_exists(node):
             raise NodeDoesNotExist
         if type(config) == dict:
@@ -151,10 +149,7 @@ class Pubsub(object):
                 elif event['channel'] == NEWNODE:
                     #node created event
                     self.nodes.add(event['data'])
-                    lredis.subscribe([NODEPUB % event['data']])
-                    lredis.subscribe([NODERETRACT % event['data']])
-                    lredis.subscribe([NODEJOBSTALLED % event['data']])
-                    lredis.subscribe([NODEJOBFINISHED % event['data']])
+                    lredis.subscribe(self[event['data']].get_channels())
                     self.create_notice(event['data'])
                 elif event['channel'] == DELNODE:
                     #node destroyed event
@@ -163,14 +158,16 @@ class Pubsub(object):
                     except KeyError:
                         #already removed -- probably locally
                         pass
-                    lredis.unsubscribe([NODEPUB % event['data']])
-                    lredis.unsubscribe([NODERETRACT % event['data']])
-                    lredis.unsubscribe([NODEJOBSTALLED % event['data']])
-                    lredis.unsubscribe([NODEJOBFINISHED % event['data']])
+                    lredis.unsubscribe(self[event['data']].get_channels())
                     self.nodeconfig.invalidate(event['data'], delete=True)
                     self.delete_notice(event['data'])
                 elif event['channel'] == CONFNODE:
                     self.nodeconfig.invalidate(event['data'])
+                elif event['channel'].startswith("node.finished"):
+                    node = event['channel'].split(":", -1)[-1]
+                    id, item, result = event['data'].split('\x00', 3)
+                    self.finish_notice(node, id, item, result)
+
     
     def create_notice(self, node):
         for ifname in self.interface:
@@ -181,12 +178,19 @@ class Pubsub(object):
             self.interface[ifname].delete_notice(node)
 
     def publish_notice(self, node, item, id):
+        self[node].event_publish(id, item)
         for ifname in self.interface:
             self.interface[ifname].publish_notice(node, item, id)
 
     def retract_notice(self, node, id):
+        self[node].event_retract(id)
         for ifname in self.interface:
             self.interface[ifname].retract_notice(node, id)
+
+    def finish_notice(self, node, id, item, result):
+        self[node].event_finished(id, item, result)
+        for ifname in self.interface:
+            self.interface[ifname].finish_notice(node, id, item, result)
 
 class Interface(object):
     name = None
@@ -212,4 +216,7 @@ class Interface(object):
         pass
 
     def delete_notice(self, node):
+        pass
+    
+    def finish_notice(self, node, id, item, result):
         pass

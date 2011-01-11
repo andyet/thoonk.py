@@ -6,6 +6,7 @@ NODECONFIG = "node.config:%s"
 
 NODEJOBSTALLED = "node.stalled:%s"
 NODEJOBFINISHED = "node.finished:%s"
+NODEJOBPENDING = "node.pending:%s"
 
 CONFNODE = "confnode"
 NEWNODE = "newnode"

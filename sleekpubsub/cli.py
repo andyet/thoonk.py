@@ -85,4 +85,7 @@ class CLInterface(Interface):
     def delete_notice(self, node):
         print "deleted: %s" % node
 
+    def finish_notice(self, node, id, item, result):
+        print "finished: %s[%s]: %s -> %s" % (node, id, item, result)
+
 
