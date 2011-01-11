@@ -30,10 +30,10 @@ class ConfigCache(object):
         self.instance = uuid.uuid4().hex
 
     def __getitem__(self, node):
-        if node in self._nodes:
-            return self._nodes[node]
-        else:
-            with self.lock:
+        with self.lock:
+            if node in self._nodes:
+                return self._nodes[node]
+            else:
                 if not self.pubsub.node_exists(node):
                     raise NodeDoesNotExist
                 config = json.loads(self.pubsub.redis.get(NODECONFIG % node))
@@ -57,10 +57,12 @@ class Pubsub(object):
         self.port = port
         self.db = db
         self.redis = redis.Redis(host=self.host, port=self.port, db=self.db)
+        self.lredis = None
         self.interface = {}
         self.nodetypes = {}
         self.nodes = set()
         self.nodeconfig = ConfigCache(self)
+        self.listen_ready = threading.Event()
         
         self.register_nodetype(u'leaf', nodes.Leaf)
         self.register_nodetype(u'queue', nodes.Queue)
@@ -71,6 +73,7 @@ class Pubsub(object):
             self.lthread = threading.Thread(target=self.listen)
             self.lthread.daemon = True
             self.lthread.start()
+            self.listen_ready.wait()
 
     def __getitem__(self, node):
         return self.nodeconfig[node]
@@ -112,7 +115,6 @@ class Pubsub(object):
             if u'type' not in dconfig:
                 dconfig[u'type'] = u'leaf'
             jconfig = json.dumps(dconfig)
-        self._config = dconfig
         self.redis.set(NODECONFIG % node, jconfig)
         self.redis.publish(CONFNODE, "%s\x00%s" % (node, self.nodeconfig.instance))
 
@@ -124,21 +126,26 @@ class Pubsub(object):
             #return node in self.nodes
         #extra sure way.... worth it?
 
+    def close(self):
+        self.redis.connection.disconnect()
+        self.lredis.connection.disconnect()
+
     def listen(self):
         #listener redis object
-        lredis = redis.Redis(host=self.host, port=self.port, db=self.db)
+        self.lredis = redis.Redis(host=self.host, port=self.port, db=self.db)
 
         # subscribe to node activities channel
-        lredis.subscribe((NEWNODE, DELNODE, CONFNODE))
+        self.lredis.subscribe((NEWNODE, DELNODE, CONFNODE))
 
         #get set of nodes
         self.nodes.update(self.redis.smembers('nodes'))
         if self.nodes:
             # subscribe to exist nodes retract and publish
-            lredis.subscribe([NODEPUB % node for node in self.nodes])
-            lredis.subscribe([NODERETRACT % node for node in self.nodes])
+            for node in self.nodes:
+                self.lredis.subscribe(self[node].get_channels())
 
-        for event in lredis.listen():
+        self.listen_ready.set()
+        for event in self.lredis.listen():
             if event['type'] == 'message':
                 if event['channel'].startswith('node.publish'):
                     #node publish event
@@ -149,7 +156,8 @@ class Pubsub(object):
                 elif event['channel'] == NEWNODE:
                     #node created event
                     self.nodes.add(event['data'])
-                    lredis.subscribe(self[event['data']].get_channels())
+                    n = self[event['data']]
+                    self.lredis.subscribe(n.get_channels())
                     self.create_notice(event['data'])
                 elif event['channel'] == DELNODE:
                     #node destroyed event
@@ -158,7 +166,7 @@ class Pubsub(object):
                     except KeyError:
                         #already removed -- probably locally
                         pass
-                    lredis.unsubscribe(self[event['data']].get_channels())
+                    self.lredis.unsubscribe(self[event['data']].get_channels())
                     self.nodeconfig.invalidate(event['data'], delete=True)
                     self.delete_notice(event['data'])
                 elif event['channel'] == CONFNODE:

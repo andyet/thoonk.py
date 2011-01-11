@@ -139,6 +139,9 @@ class Job(Queue):
     class JobDoesNotExist(Exception):
         pass
 
+    class JobNotPending(Exception):
+        pass
+
     def __init__(self, *args, **kwargs):
         Queue.__init__(self, *args, **kwargs)
         self.finished = {}
@@ -177,7 +180,7 @@ class Job(Queue):
         if self.redis.lrem(NODEJOBPENDING % self.node, id, num=1):
             query = self.redis.hget(NODEITEMS % self.node, id)
             self.redis.hdel(NODEITEMS % self.node, id)
-            self._publish_number()
+            #self._publish_number()
             self.redis.publish(NODEJOBFINISHED % self.node, "%s\x00%s\x00%s" % (id, query, value))
         else:
             raise JobDoesNotExist
@@ -186,12 +189,13 @@ class Job(Queue):
         self.check_node()
         if id in self.finished:
             del self.finished[id]
-        self._check_pending(id)
-        pipe = self.redis.pipeline()
-        pipe.lrem(NODEJOBPENDING % self.node, id, num=1)
-        pipe.rpush(NODEIDS % self.node, id)
-        pipe.execute()
-        self._publish_number(self.node)
+        if self.redis.lrem(NODEJOBPENDING % self.node, id, num=1):
+            pipe = self.redis.pipeline()
+            pipe.rpush(NODEIDS % self.node, id)
+            pipe.execute()
+            self._publish_number()
+        else:
+            raise self.JobNotPending()
 
     def stall(self, id):
         self.check_node()
