@@ -3,6 +3,7 @@ from consts import *
 from exceptions import *
 import threading
 import json
+import cPickle
 try:
     import queue
 except ImportError:
@@ -123,7 +124,7 @@ class Queue(Leaf):
         """alias to publish"""
         return self.publish(item)
 
-    def get(self, timeout=60):
+    def get(self, timeout=0):
         self.check_node()
         result = self.redis.brpop(NODEIDS % self.node, timeout)
         if result is None:
@@ -138,6 +139,13 @@ class Queue(Leaf):
         #indicates that the length of NODEIDS has changed
         #self.redis.publish(NODEPUB % self.node, "__size__\x00%d" % self.redis.llen(NODEIDS % self.node))
         pass
+
+class PythonQueue(Queue):
+    def publish(self, item):
+        return Queue.publish(self, cPickle.dumps(item))
+
+    def get(self, timeout=0):
+        return cPickle.loads(Queue.get(self, timeout))
 
 class Job(Queue):
 

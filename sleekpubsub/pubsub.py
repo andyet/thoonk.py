@@ -67,6 +67,7 @@ class Pubsub(object):
         self.register_nodetype(u'leaf', nodes.Leaf)
         self.register_nodetype(u'queue', nodes.Queue)
         self.register_nodetype(u'job', nodes.Job)
+        self.register_nodetype(u'pyqueue', nodes.PythonQueue)
 
         if listen:
             #start listener thread
