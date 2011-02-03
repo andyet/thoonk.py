@@ -45,7 +45,7 @@ class CLInterface(Interface):
         self.pubsub[args[0]].publish(" ".join(args[1:]))
 
     def cmd_delete(self, *args):
-        self.pubsub.delete_node(args[0])
+        self.pubsub[args[0]].delete_node()
 
     def cmd_retract(self, *args):
         self.pubsub[args[0]].retract(args[1])

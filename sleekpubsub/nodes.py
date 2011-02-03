@@ -8,6 +8,10 @@ try:
 except ImportError:
     import Queue as queue
 
+class ConfigurationField(object):
+    pass
+
+
 class Leaf(object):
 
     def __init__(self, pubsub, node, config=None):
@@ -58,10 +62,10 @@ class Leaf(object):
         self.check_node()
         pipe = self.redis.pipeline()
         pipe.srem("nodes", self.node)
-        pipe.delete([node_schema % self.node for node_schema in (NODEITEMS, NODEIDS, NODEPUB, NODERETRACT, NODECONFIG)])
-        pipe.execute()
+        for key in [node_schema % self.node for node_schema in (NODEITEMS, NODEIDS, NODEPUB, NODERETRACT, NODECONFIG)]:
+            pipe.delete(key)
         self.nodes.remove(self.node)
-        self.redis.publish(DELNODE, self.node)
+        self.redis.publish(DELNODE, "%s\x00\%s\x00%s" % (self.node, self.pubsub.nodeconfig.instance, "\x00".join(self.get_channels())))
 
     def get_items(self):
         self.check_node()
@@ -132,7 +136,8 @@ class Queue(Leaf):
 
     def _publish_number(self):
         #indicates that the length of NODEIDS has changed
-        self.redis.publish(NODEPUB % self.node, "__size__\x00%d" % self.redis.llen(NODEIDS % self.node))
+        #self.redis.publish(NODEPUB % self.node, "__size__\x00%d" % self.redis.llen(NODEIDS % self.node))
+        pass
 
 class Job(Queue):
 
@@ -165,7 +170,7 @@ class Job(Queue):
         self.finished[id] = q
         return id, q
 
-    def get(self, timeout=60):
+    def get(self, timeout=0):
         self.check_node()
         id = self.redis.brpoplpush(NODEIDS % self.node, NODEJOBPENDING % self.node, timeout)
         if id is None:

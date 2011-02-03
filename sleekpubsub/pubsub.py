@@ -40,8 +40,7 @@ class ConfigCache(object):
                 self._nodes[node] = self.pubsub.nodetypes[config.get(u'type', u'leaf')](self.pubsub, node, config)
                 return self._nodes[node]
 
-    def invalidate(self, data, delete=False):
-        node, instance = data.split("\x00")
+    def invalidate(self, node, instance, delete=False):
         if instance != self.instance:
             with self.lock:
                 if node in self._nodes:
@@ -63,6 +62,7 @@ class Pubsub(object):
         self.nodes = set()
         self.nodeconfig = ConfigCache(self)
         self.listen_ready = threading.Event()
+        self.listening = listen
         
         self.register_nodetype(u'leaf', nodes.Leaf)
         self.register_nodetype(u'queue', nodes.Queue)
@@ -98,7 +98,7 @@ class Pubsub(object):
             raise NodeExists
         self.nodes.add(node)
         self.set_node_config(node, config)
-        self.redis.publish(NEWNODE, node)
+        self.redis.publish(NEWNODE, "%s\x00%s" % (node,"\x00".join(self[node].get_channels())))
         if returnnode:
             return self[node]
 
@@ -122,13 +122,20 @@ class Pubsub(object):
         return self.nodes
     
     def node_exists(self, node, check=False):
-        return self.redis.sismember('nodes', node)
-            #return node in self.nodes
-        #extra sure way.... worth it?
+        if not self.listening:
+            if not node in self.nodes:
+                if self.redis.sismember('nodes', node):
+                    self.nodes.add(node)
+                    return True
+                return False
+            else:
+                return True
+        return node in self.nodes
 
     def close(self):
         self.redis.connection.disconnect()
-        self.lredis.connection.disconnect()
+        if self.listening:
+            self.lredis.connection.disconnect()
 
     def listen(self):
         #listener redis object
@@ -155,22 +162,25 @@ class Pubsub(object):
                     self.retract_notice(event['channel'].split(':', 1)[-1], event['data'])
                 elif event['channel'] == NEWNODE:
                     #node created event
-                    self.nodes.add(event['data'])
-                    n = self[event['data']]
-                    self.lredis.subscribe(n.get_channels())
-                    self.create_notice(event['data'])
+                    name = event['data'].split('\x00')[0]
+                    self.nodes.add(name)
+                    #n = self[name].sp
+                    self.lredis.subscribe(event['data'].split('\x00')[1:])
+                    self.create_notice(name)
                 elif event['channel'] == DELNODE:
                     #node destroyed event
+                    name, instance = event['data'].split('\x00')[0:2]
+                    self.lredis.unsubscribe(event['data'].split('\x00')[2:])
                     try:
-                        self.nodes.remove(event['data'])
+                        self.nodes.remove(name)
                     except KeyError:
                         #already removed -- probably locally
                         pass
-                    self.lredis.unsubscribe(self[event['data']].get_channels())
-                    self.nodeconfig.invalidate(event['data'], delete=True)
-                    self.delete_notice(event['data'])
+                    self.nodeconfig.invalidate(name, instance, delete=True)
+                    self.delete_notice(name)
                 elif event['channel'] == CONFNODE:
-                    self.nodeconfig.invalidate(event['data'])
+                    node, instance = event['data'].split('\x00', 1)
+                    self.nodeconfig.invalidate(node, instance)
                 elif event['channel'].startswith("node.finished"):
                     node = event['channel'].split(":", -1)[-1]
                     id, item, result = event['data'].split('\x00', 3)

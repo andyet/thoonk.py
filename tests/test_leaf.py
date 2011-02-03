@@ -39,5 +39,12 @@ class TestLeaf(unittest.TestCase):
             c[id] = l.get_item(id)
         self.assertEqual(c, {'1': 'hi', '2': 'bye', '4': "you're welcome"}, "Queue items did not match publish.")
 
+    def test_40_create_delete(self):
+        """Testing leaf delete"""
+        ps = sleekpubsub.Pubsub(db=10)
+        ps.redis.flushdb()
+        l = ps.leaf("test2")
+        l.delete_node()
+
 
 suite = unittest.TestLoader().loadTestsFromTestCase(TestLeaf)

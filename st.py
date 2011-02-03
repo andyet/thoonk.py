@@ -1,3 +1,4 @@
+#!/usr/bin/python
 from sleekpubsub.pubsub import Pubsub
 from sleekpubsub.cli import CLInterface
 import cProfile
@@ -14,3 +15,4 @@ def testspeed(total=40000):
     print tt, total / tt
 
 cProfile.run('testspeed()')
+#testspeed()
