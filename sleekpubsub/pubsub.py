@@ -182,10 +182,6 @@ class Pubsub(object):
                 elif event['channel'] == CONFNODE:
                     node, instance = event['data'].split('\x00', 1)
                     self.nodeconfig.invalidate(node, instance)
-                elif event['channel'].startswith("node.finished"):
-                    node = event['channel'].split(":", -1)[-1]
-                    id, item, result = event['data'].split('\x00', 3)
-                    self.finish_notice(node, id, item, result)
 
     
     def create_notice(self, node):
@@ -206,10 +202,6 @@ class Pubsub(object):
         for ifname in self.interface:
             self.interface[ifname].retract_notice(node, id)
 
-    def finish_notice(self, node, id, item, result):
-        self[node].event_finished(id, item, result)
-        for ifname in self.interface:
-            self.interface[ifname].finish_notice(node, id, item, result)
 
 class Interface(object):
     name = None

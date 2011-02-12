@@ -5,7 +5,7 @@ NODERETRACT = "node.retract:%s"
 NODECONFIG = "node.config:%s"
 
 NODEJOBSTALLED = "node.stalled:%s"
-NODEJOBFINISHED = "node.finished:%s"
+NODEJOBFINISHED = "node.finished:%s:%s"
 NODEJOBPENDING = "node.pending:%s"
 
 CONFNODE = "confnode"

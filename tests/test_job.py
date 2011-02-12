@@ -18,23 +18,23 @@ class TestJob(unittest.TestCase):
         """JOB publish, retrieve, finish, get result"""
         #publisher
         testjob = self.ps.job("testjob")
-        id, job_response = testjob.put(9.0)
+        id = testjob.put(9.0, reply=True)
         
         #worker
         testjobworker = self.ps.job("testjob")
-        id_worker, query_worker = testjobworker.get()
+        id_worker, query_worker = testjobworker.get(timeout=3)
         result_worker = math.sqrt(float(query_worker))
         testjobworker.finish(id_worker, result_worker)
         
         #publisher gets result
-        query_publisher, result_publisher = job_response.get()
+        query_publisher, result_publisher = testjob.get_result(id)
         self.assertEqual(float(result_worker), float(result_publisher), "Job results did not match publish.")
         self.assertEqual(testjob.get_items(), [])
 
     def test_20_cancel_job(self):
         j = self.ps.job("testjob")
         #publisher
-        id, q = j.put(9.0)
+        id = j.put(9.0, reply=True)
         #worker claims
         id, query = j.get()
         #publisher or worker cancels

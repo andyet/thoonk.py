@@ -157,52 +157,62 @@ class Job(Queue):
 
     def __init__(self, *args, **kwargs):
         Queue.__init__(self, *args, **kwargs)
-        self.finished = {}
+        self.finished = set()
     
     def get_channels(self):
-        return (NODEPUB % self.node, NODERETRACT % self.node, NODEJOBSTALLED % self.node, NODEJOBFINISHED % self.node)
+        return (NODEPUB % self.node, NODERETRACT % self.node, NODEJOBSTALLED % self.node)
 
     def event_stalled(self, id, value):
         pass
 
-    def event_finished(self, id, value, result):
-        if id in self.finished:
-            self.finished[id].put((value, result))
-
     def _check_pending(self, id):
         return self.redis.sismember(NODEJOBPENDING % self.node, id)
 
-    def publish(self, item):
+    def publish(self, item, reply=False):
         id = Queue.publish(self, item)
-        q = queue.Queue()
-        self.finished[id] = q
-        return id, q
+        if reply:
+            self.finished.add(id)
+            return id
+        else:
+            return id
+
+    def put(self, item, reply=False):
+        return self.publish(item, reply)
 
     def get(self, timeout=0):
         self.check_node()
-        id = self.redis.brpoplpush(NODEIDS % self.node, NODEJOBPENDING % self.node, timeout)
+        id = self.redis.brpop(NODEIDS % self.node, timeout)[1]
         if id is None:
             raise self.Empty
+        self.redis.sadd(NODEJOBPENDING % self.node, id)
         value = self.redis.hget(NODEITEMS % self.node, id)
         self._publish_number()
         return id, value
 
-    def finish(self, id, value):
+    def finish(self, id, value=None):
         self.check_node()
         #TODO: should pipe
-        if self.redis.lrem(NODEJOBPENDING % self.node, id, num=1):
+        if self.redis.srem(NODEJOBPENDING % self.node, id):
             query = self.redis.hget(NODEITEMS % self.node, id)
             self.redis.hdel(NODEITEMS % self.node, id)
             #self._publish_number()
-            self.redis.publish(NODEJOBFINISHED % self.node, "%s\x00%s\x00%s" % (id, query, value))
+            if id in self.finished:
+                self.redis.rpush(NODEJOBFINISHED % (self.node, id), "%s\x00%s" % (query, value))
         else:
             raise JobDoesNotExist
+    
+    def get_result(self, id, timeout=0):
+        result = self.redis.blpop(NODEJOBFINISHED % (self.node, id), timeout)
+        if result is None:
+            raise self.empty
+        return result[1].split("\x00")
+
+    def check_result(self, id):
+        return self.redis.llen(NODEJOBFINISHED % (self.node, id))
 
     def cancel(self, id):
         self.check_node()
-        if id in self.finished:
-            del self.finished[id]
-        if self.redis.lrem(NODEJOBPENDING % self.node, id, num=1):
+        if self.redis.srem(NODEJOBPENDING % self.node, id):
             pipe = self.redis.pipeline()
             pipe.rpush(NODEIDS % self.node, id)
             pipe.execute()
@@ -215,12 +225,11 @@ class Job(Queue):
         self._check_pending(id)
         pipe = self.redis.pipeline()
         pipe.lrem(NODEIDS % self.node, id, num=1)
-        pipe.rpush(NODEIDS % self.node, id)
+        pipe.rpush(NODEJOBSTALL % self.node, id)
         pipe.execute()
 
     def restore(self, id):
         self.check_node()
-        self.finished[id] = queue.Queue()
         self._check_stalled(self.node, id)
         pipe = self.redis.pipeline()
         pipe.lrem(NODEJOBSTALL % self.node, id, num=1)
