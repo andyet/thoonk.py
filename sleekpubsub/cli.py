@@ -1,8 +1,9 @@
 import Queue
-from pubsub import ACL, Interface, NodeExists
+from pubsub import ACL, Interface
 import threading
 import traceback
 import sys
+from exceptions import NodeExists
 
 class CLInterface(Interface):
     name = "CLI"
