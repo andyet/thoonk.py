@@ -1,0 +1,82 @@
+create_feed:
+    sadd feeds [feed] //if fail, abort
+    publish newfeed [feed]\x00[instance uuid]
+
+delete_feed:
+    pipe:
+        srem feeds [feed]
+        //for key associated with feed:
+            delete [key]
+        publish delfeed [feed]\x00[instance uuid]
+
+Leaf:
+
+publish:
+    pipe:
+        //generating id case or id not a key in feed.items.[feed]:
+            lpush feed.ids:[feed] [id]
+        hset feed.items:[feed] [id] [item]
+    publish feed.publish:[feed] [id]\x00[item]
+
+retract:
+    pipe:
+        hexists feed.items:[feed] //abort if it doesn't
+        lrem feed.ids:[feed] [id] 1
+        hdel feed.items:[feed] [id]
+    publish feed.retract:[feed] [id]
+
+get_ids:
+    lrange feed.ids:[feed] 0 -1
+
+get_item:
+    hget feed.items:[feed] [id]
+
+Queue:
+
+publish/put:
+    // id = generated uuid
+    pipe:
+        lpush feed.id:[feed] [id]
+        hset feed.items:[feed] [id] [item]
+
+get:
+    id = brpop feed.id:[feed] [timeout]
+    //if error, abort
+    item = hget feed.items:[feed] [id]
+    hdel feed.items:feed [id]
+
+Job:
+
+publish/put:
+    // same as Queue
+
+get:
+    id = brpop feed.ids:[feed] [timeout]
+    //if error, abort
+    hset feed.running:[feed] [current time]
+    item = hget feed:items[feed] [id]
+
+finish: //worker finishes job
+    hdel feed.running:[feed] [id]
+    //optionally if publishing a result:
+        item = hget feed.items:[feed] [id]
+        rpush feed.jobfinished:[feed]:[id] [item]\x00[result]
+    hdel feed.items:[feed] [id]
+
+get_result:
+    blpop feed:jobfinished:[feed]:[id] [timeout]
+
+cancel: //cancel a running job, will get retried
+    hdel feed:jobrunning:[feed] [id]
+    // if fail, abort
+    lpush feed.ids:[feed] [id]
+
+stall: //fail a running job semi-permantently and take it out of the running, but don't delete
+    hdel feed.running:[feed] [id]
+    //if fail, abort
+    rpush feed.stalled:[feed] [id]
+
+retry: //retry a stalled job
+    lrem feed.stalled:[feed] [id] 1
+    //if error, abort
+    lpush feed.ids:[feed] [id]
