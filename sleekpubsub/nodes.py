@@ -8,6 +8,7 @@ try:
     import queue
 except ImportError:
     import Queue as queue
+import time
 
 class ConfigurationField(object):
     pass
@@ -181,10 +182,11 @@ class Job(Queue):
 
     def get(self, timeout=0):
         self.check_node()
+
         id = self.redis.brpop(NODEIDS % self.node, timeout)[1]
         if id is None:
             raise self.Empty
-        self.redis.sadd(NODEJOBPENDING % self.node, id)
+        self.redis.hset(NODEJOBPENDING % self.node, id, time.time())
         value = self.redis.hget(NODEITEMS % self.node, id)
         self._publish_number()
         return id, value
@@ -192,12 +194,12 @@ class Job(Queue):
     def finish(self, id, value=None):
         self.check_node()
         #TODO: should pipe
-        if self.redis.srem(NODEJOBPENDING % self.node, id):
-            query = self.redis.hget(NODEITEMS % self.node, id)
-            self.redis.hdel(NODEITEMS % self.node, id)
+        if self.redis.hdel(NODEJOBPENDING % self.node, id):
             #self._publish_number()
             if id in self.finished:
+                query = self.redis.hget(NODEITEMS % self.node, id)
                 self.redis.rpush(NODEJOBFINISHED % (self.node, id), "%s\x00%s" % (query, value))
+            self.redis.hdel(NODEITEMS % self.node, id)
         else:
             raise JobDoesNotExist
     
