@@ -44,7 +44,7 @@ class TestLeaf(unittest.TestCase):
         ps = sleekpubsub.Pubsub(db=10)
         ps.redis.flushdb()
         l = ps.leaf("test2")
-        l.delete_node()
+        l.delete_feed()
 
 
 suite = unittest.TestLoader().loadTestsFromTestCase(TestLeaf)

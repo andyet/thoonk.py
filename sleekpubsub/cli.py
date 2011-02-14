@@ -3,7 +3,7 @@ from pubsub import ACL, Interface
 import threading
 import traceback
 import sys
-from exceptions import NodeExists
+from exceptions import FeedExists
 
 class CLInterface(Interface):
     name = "CLI"
@@ -38,21 +38,21 @@ class CLInterface(Interface):
 
     def cmd_create(self, *args):
         try:
-            self.pubsub.create_node(args[0], {})
-        except NodeExists:
-            print "Node already exists"
+            self.pubsub.create_feed(args[0], {})
+        except FeedExists:
+            print "Feed already exists"
 
     def cmd_publish(self, *args):
         self.pubsub[args[0]].publish(" ".join(args[1:]))
 
     def cmd_delete(self, *args):
-        self.pubsub[args[0]].delete_node()
+        self.pubsub[args[0]].delete_feed()
 
     def cmd_retract(self, *args):
         self.pubsub[args[0]].retract(args[1])
 
-    def cmd_nodes(self, *args):
-        print self.pubsub.get_nodes()
+    def cmd_feeds(self, *args):
+        print self.pubsub.get_feeds()
 
     def cmd_items(self, *args):
         print self.pubsub[args[0]].get_items()
@@ -69,24 +69,24 @@ class CLInterface(Interface):
         print self.pubsub[args[0]].config
 
     def cmd_setconfig(self, *args):
-        node = args[0]
+        feed = args[0]
         config = ' '.join(args[1:])
-        self.pubsub[node].config = config
+        self.pubsub[feed].config = config
         print "Ok."
 
-    def publish_notice(self, node, item, id):
-        print "publish: %s[%s]: %s" % (node, id, item)
+    def publish_notice(self, feed, item, id):
+        print "publish: %s[%s]: %s" % (feed, id, item)
 
-    def retract_notice(self, node, id):
-        print "retract: %s[%s]" % (node, id)
+    def retract_notice(self, feed, id):
+        print "retract: %s[%s]" % (feed, id)
 
-    def create_notice(self, node):
-        print "created: %s" % node
+    def create_notice(self, feed):
+        print "created: %s" % feed
 
-    def delete_notice(self, node):
-        print "deleted: %s" % node
+    def delete_notice(self, feed):
+        print "deleted: %s" % feed
 
-    def finish_notice(self, node, id, item, result):
-        print "finished: %s[%s]: %s -> %s" % (node, id, item, result)
+    def finish_notice(self, feed, id, item, result):
+        print "finished: %s[%s]: %s -> %s" % (feed, id, item, result)
 
 

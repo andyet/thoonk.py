@@ -18,13 +18,13 @@ class TestJob(unittest.TestCase):
         """JOB publish, retrieve, finish, get result"""
         #publisher
         testjob = self.ps.job("testjob")
-        id = testjob.put(9.0, reply=True)
+        id = testjob.put(9.0)
         
         #worker
         testjobworker = self.ps.job("testjob")
         id_worker, query_worker = testjobworker.get(timeout=3)
         result_worker = math.sqrt(float(query_worker))
-        testjobworker.finish(id_worker, result_worker)
+        testjobworker.finish(id_worker, result_worker, True)
         
         #publisher gets result
         query_publisher, result_publisher = testjob.get_result(id)
@@ -34,7 +34,7 @@ class TestJob(unittest.TestCase):
     def test_20_cancel_job(self):
         j = self.ps.job("testjob")
         #publisher
-        id = j.put(9.0, reply=True)
+        id = j.put(9.0)
         #worker claims
         id, query = j.get()
         #publisher or worker cancels

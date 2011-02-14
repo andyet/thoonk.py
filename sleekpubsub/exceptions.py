@@ -1,11 +1,11 @@
 
-class NodeExists(Exception):
+class FeedExists(Exception):
     pass
 
 class NotAllowed(Exception):
     pass
 
-class NodeDoesNotExist(Exception):
+class FeedDoesNotExist(Exception):
     pass
 
 class ItemDoesNotExist(Exception):
