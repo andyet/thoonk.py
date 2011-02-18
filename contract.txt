@@ -9,6 +9,10 @@ delete_feed:
             delete [key]
         publish delfeed [feed]\x00[instance uuid]
 
+set_config:
+    set feed.config:[feed] //json(config)
+    publish conffeed [feed]\x00[instance uuid]
+
 Leaf:
 
 publish:

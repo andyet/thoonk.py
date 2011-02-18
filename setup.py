@@ -26,8 +26,8 @@ import sys
 # from setuptools import setup, find_packages, Extension, Feature
 
 VERSION          = '1.0.0.0'
-DESCRIPTION      = 'SleekPubsub is a clusterable, Redis based, Publish-Subscribe, Queue, and Job Distrubtion system based on the philosophies of XMPP Pubsub (XEP-0060).'
-LONG_DESCRIPTION      = 'SleekPubsub is a clusterable, Redis based, Publish-Subscribe, Queue, and Job Distrubtion system based on the philosophies of XMPP Pubsub (XEP-0060).'
+DESCRIPTION      = 'Thoonk is a clusterable, Redis based, Publish-Subscribe, Queue, and Job Distrubtion system based on the philosophies of XMPP Pubsub (XEP-0060).'
+LONG_DESCRIPTION      = 'Thoonk is a clusterable, Redis based, Publish-Subscribe, Queue, and Job Distrubtion system based on the philosophies of XMPP Pubsub (XEP-0060).'
 
 CLASSIFIERS      = [ 'Intended Audience :: Developers',
                      'License :: OSI Approved :: MIT',
@@ -35,8 +35,7 @@ CLASSIFIERS      = [ 'Intended Audience :: Developers',
                      'Topic :: Software Development :: Libraries :: Python Modules',
                    ]
 
-packages     = [ 'sleekpubsub',
-                'sleekpubsub/xmpp',
+packages     = [ 'thoonk',
                  ]
 
 
@@ -47,11 +46,11 @@ setup(
     long_description = LONG_DESCRIPTION,
     author       = 'Nathanael Fritz',
     author_email = 'fritzy [at] netflint.net',
-    url          = 'http://github.com/fritzy/SleekPubsub',
+    url          = 'http://github.com/fritzy/thoonk.py',
     license      = 'MIT',
     platforms    = [ 'any' ],
     packages     = packages,
     py_modules   = [],
-    requires     = [ 'sleekxmpp',],
+    requires     = [],
     )
 
