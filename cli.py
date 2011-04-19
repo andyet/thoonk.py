@@ -1,5 +1,5 @@
-from sleekpubsub.pubsub import Pubsub
-from sleekpubsub.cli import CLInterface
+from thoonk.pubsub import Pubsub
+from thoonk.cli import CLInterface
 
 p = Pubsub(listen=True, db=10)
 i = CLInterface()

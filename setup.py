@@ -40,7 +40,7 @@ packages     = [ 'thoonk',
 
 
 setup(
-    name             = "sleekpubsub",
+    name             = "thoonk",
     version          = VERSION,
     description      = DESCRIPTION,
     long_description = LONG_DESCRIPTION,
