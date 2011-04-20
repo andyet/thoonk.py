@@ -14,7 +14,7 @@ class ConfigurationField(object):
     pass
 
 
-class Leaf(object):
+class Feed(object):
 
     def __init__(self, pubsub, feed, config=None):
         self.config_lock = threading.Lock()
@@ -120,7 +120,7 @@ class Leaf(object):
         self.redis.publish(FEEDRETRACT % self.feed, id)
         return result
 
-class Queue(Leaf):
+class Queue(Feed):
 
     class Empty(Exception):
         pass

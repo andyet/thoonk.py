@@ -37,7 +37,7 @@ class ConfigCache(object):
                 if not self.pubsub.feed_exists(feed):
                     raise FeedDoesNotExist
                 config = json.loads(self.pubsub.redis.get(FEEDCONFIG % feed))
-                self._feeds[feed] = self.pubsub.feedtypes[config.get(u'type', u'leaf')](self.pubsub, feed, config)
+                self._feeds[feed] = self.pubsub.feedtypes[config.get(u'type', u'feed')](self.pubsub, feed, config)
                 return self._feeds[feed]
 
     def invalidate(self, feed, instance, delete=False):
@@ -64,7 +64,7 @@ class Pubsub(object):
         self.listen_ready = threading.Event()
         self.listening = listen
         
-        self.register_feedtype(u'leaf', feeds.Leaf)
+        self.register_feedtype(u'feed', feeds.Feed)
         self.register_feedtype(u'queue', feeds.Queue)
         self.register_feedtype(u'job', feeds.Job)
         self.register_feedtype(u'pyqueue', feeds.PythonQueue)
@@ -108,13 +108,13 @@ class Pubsub(object):
             raise FeedDoesNotExist
         if type(config) == dict:
             if u'type' not in config:
-                config[u'type'] = u'leaf'
+                config[u'type'] = u'feed'
             jconfig = json.dumps(config)
             dconfig = config
         else:
             dconfig = json.loads(config)
             if u'type' not in dconfig:
-                dconfig[u'type'] = u'leaf'
+                dconfig[u'type'] = u'feed'
             jconfig = json.dumps(dconfig)
         self.redis.set(FEEDCONFIG % feed, jconfig)
         self.redis.publish(CONFFEED, "%s\x00%s" % (feed, self.feedconfig.instance))
