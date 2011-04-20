@@ -41,6 +41,7 @@ class Leaf(object):
 
     @property
     def config(self):
+        print "getting config..."
         with self.config_lock:
             self.check_feed()
             if not self.config_valid:
@@ -52,7 +53,7 @@ class Leaf(object):
     def config(self, config):
         with self.config_lock:
             self.pubsub.set_feed_config(self.feed, config)
-            self.config_valid = True
+            self.config_valid = False
 
     @config.deleter
     def config(self):
@@ -83,16 +84,28 @@ class Leaf(object):
     def publish(self, item, id=None):
         self.check_feed()
         pipe = self.redis.pipeline()
+        fpushed = False
         if id is None:
             id = uuid.uuid4().hex
             pipe.lpush(FEEDIDS % self.feed, id)
+            fpushed = True
         #each condition has the same lpush, but I want to avoid
         #running the second condition if I can
         elif not self.redis.hexists(FEEDITEMS % self.feed, id):
             pipe.lpush(FEEDIDS % self.feed, id)
+            fpushed = True
         pipe.hset(FEEDITEMS % self.feed, id, item)
-        pipe.execute()
+        results = pipe.execute()
         self.redis.publish(FEEDPUB % self.feed, "%s\x00%s" % (id, item))
+
+        # if we increased the size of the feed
+        # check to see if we've exceeded the max_length
+        if fpushed:
+            max_length = int(self.config.get('max_length', 0))
+            if max_length and int(results[0]) > max_length:
+                delete_ids = self.redis.lrange(FEEDIDS % self.feed, max_length, -1)
+                for delete_id in delete_ids:
+                    self.retract(delete_id)
         return id
 
     def retract(self, id):
