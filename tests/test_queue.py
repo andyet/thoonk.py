@@ -1,11 +1,11 @@
-import sleekpubsub
+import thoonk
 import unittest
 
 class TestQueue(unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
-        self.ps = sleekpubsub.Pubsub(db=10)
+        self.ps = thoonk.Pubsub(db=10)
         self.ps.redis.flushdb()
 
     def test_basic_queue(self):

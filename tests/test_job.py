@@ -1,4 +1,4 @@
-import sleekpubsub
+import thoonk
 import unittest
 import math
 
@@ -8,7 +8,7 @@ class TestJob(unittest.TestCase):
         unittest.TestCase.__init__(self, *args, **kwargs)
 
     def setUp(self):
-        self.ps = sleekpubsub.Pubsub(db=10, listen=True)
+        self.ps = thoonk.Pubsub(db=10, listen=True)
         self.ps.redis.flushdb()
 
     def tearDown(self):
