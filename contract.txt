@@ -1,90 +1,234 @@
-create_feed:
-    sadd feeds [feed] //if fail, abort
-    publish newfeed [feed]\x00[instance uuid]
+Create Feed:
+    SADD feeds [feed] //if fail, abort
+    PUBLISH newfeed [feed]\x00[instance uuid]
 
-delete_feed:
-    multi:
-        srem feeds [feed]
-        //for key associated with feed:
-            delete [key]
-        publish delfeed [feed]\x00[instance uuid]
+Delete Feed:
+    WATCH feeds
+    SISMEMBER feeds [feed] //if nil: fail
+    MULTI
+        SREM feeds [feed]
+        for key associated with feed:
+            DELETE [key]
+        PUBLISH delfeed [feed]\x00[instance uuid]
+    EXEC // if nil: go back to WATCH
 
-set_config:
-    set feed.config:[feed] //json(config)
-    publish conffeed [feed]\x00[instance uuid]
+Set Config:
+    SET feed.config:[feed] //json(config)
+    PUBLISH conffeed [feed]\x00[instance uuid]
 
-Leaf:
+Feed:
 
-    publish:
-        multi:
-            //generating id case or id not a key in feed.items.[feed]:
-                lpush feed.ids:[feed] [id]
-            hset feed.items:[feed] [id] [item]
-        publish feed.publish:[feed] [id]\x00[item]
+    Publish:
+        //id may be provided or generated. An id that has already been published will update that id
+    
+        WATCH feed.ids:[feed]
+        delete_ids = ZRANGE feed.ids:[feed] 0 [-(max + 1)] // eg ZRANGE feed.ids:test 0 -5 if the max is 4
+        MULTI
+            for id in delete_ids:
+                if id != publish_id:
+                    ZREM feed.ids:[feed] [id]
+                    HDEL feed.items:[feed] [id]
+                    PUBLISH feed.retract:[feed] [id]
+            ZADD feed.ids:[feed] [utc epoch milliseconds] [id]
+            INCR feed.publishes:[feed]
+            HSET feed.items:[feed] [id] [item]
+        EXEC // if nil, go back to WATCH
+        //if zadd returned 1
+            PUBLISH feed.publish:[feed] [id]\x00[item]
+        //else
+            PUBLISH feed.edit:[feed] [id]\x00[item]
 
-    retract:
-        multi:
-            hexists feed.items:[feed] //abort if it doesn't
-            lrem feed.ids:[feed] [id] 1
-            hdel feed.items:[feed] [id]
-        publish feed.retract:[feed] [id]
 
-    get_ids:
-        lrange feed.ids:[feed] 0 -1
+    Retract:
+        WATCH feed.ids:[feed]
+        if ZRANK feed.ids:[feed] [id]
+            MULTI
+                ZREM feed.ids:[feed] [id]
+                HDEL feed.items:[feed] [id]
+                PUBLISH feed.retract:[feed] [id]
+            EXEC // if nil, go back to WATCH
 
-    get_item:
-        hget feed.items:[feed] [id]
+    Get IDs:
+        ZRANGE feed.ids:[feed] 0 -1
+
+    Get Items:
+        HGET feed.items:[feed] [id]
+
+    Get All:
+        HGETALL feed.items:[feed]
+
+
+List:
+
+    Publish:
+        id = INCR feed.idincr:[feed]
+        MULTI
+            LPUSH feed.ids:[feed] [id]
+            HSET feed.items:[feed] [id] [item]
+            INCR feed.publishes:[feed]
+            PUBLISH feed.publish:[feed] [id]\x00[item]
+        EXEC
+
+    Edit:
+        WATCH feed.items:[feed]
+        HEXISTS feed.items:[feed] [id] //if not: fail
+        MULTI
+            HSET feed.items:[feed] [id] [item]
+            INCR feed.publishes:[feed]
+            PUBLISH feed.publish:[feed] [id]\x00[item]
+        EXEC //if nil, retry at WATCH
+
+    Publish Before:
+        WATCH feed.items:[feed]
+        HEXISTS feed.items:[feed] [before id] //if not: fail
+        id = INCR feed.idincr:[feed]
+        MULTI
+            LINSERT feed.ids:[feed] BEFORE [before id] [id]
+            HSET feed.items:[feed] [id] [item]
+            INCR feed.publishes:[feed]
+            PUBLISH feed.publish:[feed] [id]\x00[item]
+        EXEC // if nil: retry at WATCH
+    
+    Publish After:
+        WATCH feed.items:[feed]
+        HEXISTS feed.items:[feed] [after id] //if not: fail
+        id = INCR feed.idincr:[feed]
+        MULTI
+            LINSERT feed.ids:[feed] AFTER [after id] [id]
+            HSET feed.items:[feed] [id] [item]
+            INCR feed.publishes:[feed]
+            PUBLISH feed.publish:[feed] [id]\x00[item]
+        EXEC // if nil: retry at WATCH
+    
+    Retract:
+        WATCH feed.items:[feed]
+        if HEXISTS feed.items:[feed] [id]
+            MULTI
+                LREM feed.ids:[feed] 1 [id]
+                HDEL feed.items:[feed] [id]
+                PUBLISH feed.retract:[feed] [id]
+            EXEC // if nil, go back to WATCH
+        else UNWATCH feed.ids:[feed]
+
+    Get IDs:
+        LRANGE feed.ids:[feed] 0 -1
+
+    Get Items:
+        HGET feed.items:[feed] [id]
+
+    Get All:
+        HGETALL feed.items:[feed]
+
 
 Queue:
 
-    publish/put:
+    Normal Priority Put:
         // id = generated uuid
-        multi:
-            lpush feed.ids:[feed] [id]
-            hset feed.items:[feed] [id] [item]
+        MULTI
+            LPUSH feed.ids:[feed] [id]
+            HSET feed.items:[feed] [id] [item]
+            INCR feed.publishes:[feed]
+        EXEC
 
-    get:
-        id = brpop feed.ids:[feed] [timeout]
+    High Priority Put:
+        // id = generated uuid
+        MULTI
+            RPUSH feed.ids:[feed] [id]
+            HSET feed.items:[feed] [id] [item]
+            INCR feed.publishes:[feed]
+        EXEC
+
+    Get:
+        id = BRPOP feed.ids:[feed] [timeout]
         //if error, abort
-        item = hget feed.items:[feed] [id]
-        hdel feed.items:feed [id]
+        MULTI
+            item = HGET feed.items:[feed] [id]
+            HDEL feed.items:feed [id]
+        EXEC
 
 Job:
 
-    publish/put:
-        // same as Queue
+    Normal Priority Put:
+        // id = generated uuid
+        MULTI
+            LPUSH feed.ids:[feed] [id]
+            INCR feed.publishes:[feed]
+            HSET feed.items:[feed] [id] [item]
+            ZADD feed.published:[feed] [utc epoch] [id]
+        EXEC
 
-    get:
-        id = brpoplpush feed.ids:[feed] feed.running:[feed] [timeout]
+    High Priority Put:
+        // id = generated uuid
+        MULTI
+            RPUSH feed.ids:[feed] [id]
+            HSET feed.items:[feed] [id] [item]
+            ZADD feed.published:[feed] [utc epoch] [id]
+        EXEC
+
+    Get:
+        id = BRPOPLPUSH feed.ids:[feed] [timeout]
         //if error/timeout, abort
-        hset feed.claimed:[feed] [id] [epoch]
-        item = hget feed:items[feed] [id]
+        MULTI
+            ZADD feed.claimed:[feed] [id] [utc epoch]
+            item = HGET feed:items[feed] [id]
+        EXEC
+        //if the id fails to get from feed.ids to feed.claimed, the maintenance will notice eventually
 
-    finish: //worker finishes job
-        lrem feed.running:[feed] 1 [id]
-        hdel feed.claimed:[feed] [id]
-        hdel feed.cancelled:[feed] [id]
-        //optionally if publishing a result:
-            item = hget feed.items:[feed] [id]
-            rpush feed.jobfinished:[feed]:[id] [item]\x00[result]
-        hdel feed.items:[feed] [id]
+    Finish: //worker finishes job
+        WATCH feed.claimed:[feed]
+        ZRANK feed.claimed:[feed] [id] // if nil: fail, this job isn't claimed and you can't finish it
+        MULTI
+            ZREM feed.claimed:[feed] [id]
+            HDEL feed.cancelled:[feed] [id] //just to make sure
+            //optionally if publishing a result:
+                LPUSH feed.jobfinished:[feed]\x00[id] [item]\x00[result]
+                EXPIRE feed.jobfinished:[feed]\x00[id] [timeout]
+            HDEL feed.items:[feed] [id]
+        EXEC // if nil: go back to WATCH and try again
 
-    get_result:
-        blpop feed:jobfinished:[feed]:[id] [timeout]
+    Get Result:
+        BRPOP feed:jobfinished:[feed]\x00[id] [timeout]
 
-    cancel: //cancel a running job, will get retried
-        lrem feed:jobrunning:[feed] 1 [id]
-        incr feed.cancelled:[feed]
-        // if fail, abort
-        lpush feed.ids:[feed] [id]
+    Cancel: //cancel a running job, will get retried
+        WATCH feed.claimed:[feed]
+        ZRANK feed.claimed:[feed] [id] // if nil: fail
+        MULTI
+            HINCRBY feed.cancelled:[feed] [id] 1
+            LPUSH feed.ids:[feed] [id]
+            ZREM feed.claimed:[feed] [id]
+        EXEC // if nil: go back to watch and try again
 
-    stall: //fail a running job semi-permantently and take it out of the running, but don't delete
-        lrem feed.running:[feed] 1 [id]
-        //if fail, abort
-        rpush feed.stalled:[feed] [id]
+    Stall: //fail a claimed job semi-permantently and take it out of the running, but don't delete
+        WATCH feed.claimed:[feed]
+        ZRANK feed.claimed:[feed] [id] // if nil: fail
+        MULTI
+            ZREM feed.claimed:[feed] [id]
+            HDEL feed.cancelled:[feed] [id]
+            SADD feed.stalled:[feed] [id]
+            ZREM feed.published:[feed] [id]
+        EXEC
 
-    retry: //retry a stalled job
-        lrem feed.stalled:[feed] [id] 1
-        hdel feed.cancelled:[feed] [id]
-        //if error, abort
-        lpush feed.ids:[feed] [id]
+    Retry: //retry a stalled job
+        WATCH feed.stalled:[feed]
+        ZRANGE feed.stalled:[feed] [id] // if nil: fail
+        MULTI
+            SREM feed.stalled:[feed] [id]
+            //if error, abort
+            LPUSH feed.ids:[feed] [id]
+            ZADD feed.published:[feed] [utc epoch] [id]
+        EXEC
+
+    Maintenance: //maintain job queue -- only ran by one process per jobqueue on occasion
+        MULTI
+            keys = HKEYS feed.items:[feed]
+            avail = LRANGE feed.ids:[feed]
+            claim = ZRANGE feed.claimed:[feed] 0 -1
+            stall = SMEMBERS feed.stalled:[feed]
+        EXEC
+        unaccounted = any of keys not in avail, claim, stall
+        for key in unnaccounted_last:
+            if key in keys and not in avail, claim, stall:
+                LPUSH feed.ids:[feed] [key]
+
+        check claimed jobs to see if any have been claimed too long and "Cancel" or "Stall" them
+        publish stats to a feed
