@@ -1,7 +1,7 @@
-from sleekpubsub import Pubsub
+from thoonk import Pubsub
 
 p = Pubsub()
-n = p.leaf("test")
+n = p.feed("test")
 id = n.publish("hayyyyyy", id='crap')
 print id, n.get_item(id)
 q = p.queue("queue_test")

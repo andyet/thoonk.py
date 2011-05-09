@@ -1,5 +1,5 @@
-from sleekpubsub.pubsub import Pubsub
-from sleekpubsub.cli import CLInterface
+from thoonk.pubsub import Pubsub
+from thoonk.cli import CLInterface
 import cProfile
 import time
 import math
