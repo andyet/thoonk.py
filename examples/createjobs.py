@@ -1,5 +1,4 @@
 from thoonk.pubsub import Pubsub
-from thoonk.cli import CLInterface
 import cProfile
 import time
 

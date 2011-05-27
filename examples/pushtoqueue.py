@@ -1,5 +1,5 @@
-import sleekpubsub
-ps = sleekpubsub.Pubsub()
+import thoonk
+ps = thoonk.Pubsub()
 q = ps.pyqueue('testpyqueue')
 
 q.put("this is a string")

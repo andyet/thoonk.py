@@ -22,7 +22,7 @@ Feed:
         //id may be provided or generated. An id that has already been published will update that id
     
         WATCH feed.ids:[feed]
-        delete_ids = ZRANGE feed.ids:[feed] 0 [-(max + 1)] // eg ZRANGE feed.ids:test 0 -5 if the max is 4
+        delete_ids = ZRANGE feed.ids:[feed] 0 [-max] // eg ZRANGE feed.ids:test 0 -5 if the max is 4
         MULTI
             for id in delete_ids:
                 if id != publish_id:

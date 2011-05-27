@@ -1,55 +1,16 @@
+import json
 import redis
 import threading
 import uuid
-import json
-import feeds
-from consts import *
-from exceptions import *
 
-class ACL(object):
-    def can_publish(self, ident, feed, item, id):
-        return True
+from thoonk import feeds
+from thoonk.consts import *
+from thoonk.exceptions import *
+from thoonk.config import ConfigCache
 
-    def can_create(self, ident, feed, config):
-        return True
 
-    def can_delete(self, ident, feed, config):
-        return True
+class Thoonk(object):
 
-    def can_retract(self, ident, feed, item):
-        return True
-
-    def subscribe(self, ident, feed, id):
-        return True
-
-class ConfigCache(object):
-    def __init__(self, pubsub):
-        self._feeds = {}
-        self.pubsub = pubsub
-        self.lock = threading.Lock()
-        self.instance = uuid.uuid4().hex
-
-    def __getitem__(self, feed):
-        with self.lock:
-            if feed in self._feeds:
-                return self._feeds[feed]
-            else:
-                if not self.pubsub.feed_exists(feed):
-                    raise FeedDoesNotExist
-                config = json.loads(self.pubsub.redis.get(FEEDCONFIG % feed))
-                self._feeds[feed] = self.pubsub.feedtypes[config.get(u'type', u'feed')](self.pubsub, feed, config)
-                return self._feeds[feed]
-
-    def invalidate(self, feed, instance, delete=False):
-        if instance != self.instance:
-            with self.lock:
-                if feed in self._feeds:
-                    if delete:
-                        del self._feeds[feed]
-                    else:
-                        del self._feeds[feed].config
-
-class Pubsub(object):
     def __init__(self, allfeeds=True, host='localhost', port=6379, db=0, listen=False):
         self.allfeeds = allfeeds
         self.host = host
@@ -57,17 +18,39 @@ class Pubsub(object):
         self.db = db
         self.redis = redis.Redis(host=self.host, port=self.port, db=self.db)
         self.lredis = None
-        self.interface = {}
+        self.handlers = {}
         self.feedtypes = {}
         self.feeds = set()
         self.feedconfig = ConfigCache(self)
         self.listen_ready = threading.Event()
         self.listening = listen
-        
+
         self.register_feedtype(u'feed', feeds.Feed)
         self.register_feedtype(u'queue', feeds.Queue)
         self.register_feedtype(u'job', feeds.Job)
         self.register_feedtype(u'pyqueue', feeds.PythonQueue)
+
+        self.FEED_CONFIG = "feed.config:%s"
+        self.FEED_EDIT = "feed.edit:%s"
+        self.FEED_IDS = "feed.ids:%s"
+        self.FEED_ITEMS = "feed.items:%s"
+        self.FEED_PUB = "feed.publish:%s"
+        self.FEED_PUBS = "feed.publishes:%s"
+        self.FEED_RETRACT = "feed.retract:%s"
+        self.FEED_JOB_STALLED = "feed.stalled:%s"
+        self.FEED_JOB_FINISHED = "feed.finished:%s:%s"
+        self.FEED_JOB_RUNNING = "feed.running:%s"
+
+        self.CONF_FEED = 'conffeed'
+        self.DEL_FEED = 'delfeed'
+        self.JOB_STATS = 'jobstats'
+        self.NEW_FEED = 'newfeed'
+
+        self.feed_schemas = set(self.FEED_CONFIG, self.FEED_EDIT,
+                self.FEED_IDS, self.FEED_ITEMS, self.FEED_PUB,
+                self.FEED_PUBS, self.FEED_RETRACT,
+                self.FEED_JOB_STALLED, self.FEED_JOB_FINISHED,
+                self.FEED_JOB_RUNNING)
 
         if listen:
             #start listener thread
@@ -76,8 +59,14 @@ class Pubsub(object):
             self.lthread.start()
             self.listen_ready.wait()
 
+    def _publish(self, schema, items):
+        self.redis.publish(schema, "\x00".join(items))
+
     def __getitem__(self, feed):
         return self.feedconfig[feed]
+
+    def __setitem__(self, feed, config):
+        self.set_config(feed, config)
 
     def register_feedtype(self, feedtype, klass):
         self.feedtypes[feedtype] = klass
@@ -90,20 +79,40 @@ class Pubsub(object):
                 return self.create_feed(feed, config, True)
         setattr(self, feedtype, startclass)
 
-    def register_interface(self, interface):
-        self.interface[interface.name] = interface
-        interface.register(self)
+    def register_schema(self, schema):
+        self.feed_schemas.add(schema)
 
-    def create_feed(self, feed, config, returnfeed=False):
+    def register_handler(self, name, handler):
+        if name not in self.handlers:
+            self.handlers[name] = []
+        self.handlers.append(handler)
+
+    def create_feed(self, feed, config):
         if not self.redis.sadd("feeds", feed):
             raise FeedExists
         self.feeds.add(feed)
-        self.set_feed_config(feed, config)
-        self.redis.publish(NEWFEED, "%s\x00%s" % (feed, self.feedconfig.instance))
-        if returnfeed:
-            return self[feed]
+        self.set_config(feed, config)
+        self._publish(NEWFEED, (feed, self.feedconfig.instance))
+        return self[feed]
 
-    def set_feed_config (self, feed, config):
+    def delete_feed(self, feed):
+        deleted = False
+        while not deleted:
+            self.redis.watch('feeds')
+            if not self.feed_exists(feed):
+                return FeedDoesNotExist
+            pipe = self.redis.pipeline()
+            pipe.srem("feeds", feed)
+            for key in [schema % feed for schema in self.feed_schemas]
+                pipe.delete(key)
+                self._publish(DELFEED, (feed, self.feedconfig.instance))
+            try:
+                pipe.execute()
+                deleted = True
+            except redis.exceptions.WatchError:
+                deleted = False
+
+    def set_config (self, feed, config):
         if not self.feed_exists(feed):
             raise FeedDoesNotExist
         if type(config) == dict:
@@ -117,11 +126,11 @@ class Pubsub(object):
                 dconfig[u'type'] = u'feed'
             jconfig = json.dumps(dconfig)
         self.redis.set(FEEDCONFIG % feed, jconfig)
-        self.redis.publish(CONFFEED, "%s\x00%s" % (feed, self.feedconfig.instance))
+        self._publish(CONFFEED, (feed, self.feedconfig.instance))
 
     def get_feeds(self):
         return self.feeds
-    
+
     def feed_exists(self, feed, check=False):
         if not self.listening:
             if not feed in self.feeds:
@@ -139,13 +148,13 @@ class Pubsub(object):
             self.lredis.connection.disconnect()
 
     def listen(self):
-        #listener redis object
+        # listener redis object
         self.lredis = redis.Redis(host=self.host, port=self.port, db=self.db)
 
         # subscribe to feed activities channel
         self.lredis.subscribe((NEWFEED, DELFEED, CONFFEED))
 
-        #get set of feeds
+        # get set of feeds
         self.feeds.update(self.redis.smembers('feeds'))
         if self.feeds:
             # subscribe to exist feeds retract and publish
@@ -158,15 +167,17 @@ class Pubsub(object):
                 if event['channel'].startswith('feed.publish'):
                     #feed publish event
                     id, item = event['data'].split('\x00', 1)
-                    self.publish_notice(event['channel'].split(':', 1)[-1], item, id)
+                    self.publish_notice(event['channel'].split(':', 1)[-1],
+                                        item, id)
                 elif event['channel'].startswith('feed.retract'):
-                    self.retract_notice(event['channel'].split(':', 1)[-1], event['data'])
+                    self.retract_notice(event['channel'].split(':', 1)[-1],
+                                        event['data'])
                 elif event['channel'] == NEWFEED:
                     #feed created event
                     name, instance = event['data'].split('\x00')
                     self.feeds.add(name)
-                    #n = self[name].sp
-                    self.lredis.subscribe((FEEDPUB % name, FEEDRETRACT % name))
+                    self.lredis.subscribe((FEEDPUB % name,
+                                           FEEDRETRACT % name))
                     self.create_notice(name)
                 elif event['channel'] == DELFEED:
                     #feed destroyed event
@@ -181,51 +192,21 @@ class Pubsub(object):
                 elif event['channel'] == CONFFEED:
                     feed, instance = event['data'].split('\x00', 1)
                     self.feedconfig.invalidate(feed, instance)
-    
+
     def create_notice(self, feed):
-        for ifname in self.interface:
-            self.interface[ifname].create_notice(feed)
+        for handler in self.handlers['create_notice']:
+            handler(feed)
 
     def delete_notice(self, feed):
-        for ifname in self.interface:
-            self.interface[ifname].delete_notice(feed)
+        for handler in self.handlers['delete_notice']:
+            handler(feed)
 
     def publish_notice(self, feed, item, id):
         self[feed].event_publish(id, item)
-        for ifname in self.interface:
-            self.interface[ifname].publish_notice(feed, item, id)
+        for handler in self.handlers['publish_notice']:
+            handler(feed, item, id)
 
     def retract_notice(self, feed, id):
         self[feed].event_retract(id)
-        for ifname in self.interface:
-            self.interface[ifname].retract_notice(feed, id)
-
-
-class Interface(object):
-    name = None
-    def __init__(self):
-        self.pubsub = None
-        self.acl = None
-
-    def register(self, pubsub):
-        self.pubsub = pubsub
-        self.start()
-
-    def start(self):
-        """This should be overridden"""
-        self.acl = ACL()
-
-    def publish_notice(self, feed, item, id):
-        pass
-
-    def retract_notice(self, feed, id):
-        pass
-
-    def create_notice(self, feed):
-        pass
-
-    def delete_notice(self, feed):
-        pass
-    
-    def finish_notice(self, feed, id, item, result):
-        pass
+        for handler in self.handlers['publish_notice']:
+            handler(feed, id)
