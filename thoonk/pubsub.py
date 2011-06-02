@@ -18,7 +18,11 @@ class Thoonk(object):
         self.db = db
         self.redis = redis.Redis(host=self.host, port=self.port, db=self.db)
         self.lredis = None
-        self.handlers = {}
+        self.handlers = {
+                'create_notice': [],
+                'delete_notice': [],
+                'publish_notice': [],
+                'retract_notice': []}
         self.feedtypes = {}
         self.feeds = set()
         self.feedconfig = ConfigCache(self)
@@ -37,6 +41,7 @@ class Thoonk(object):
         self.FEED_PUB = "feed.publish:%s"
         self.FEED_PUBS = "feed.publishes:%s"
         self.FEED_RETRACT = "feed.retract:%s"
+
         self.FEED_JOB_STALLED = "feed.stalled:%s"
         self.FEED_JOB_FINISHED = "feed.finished:%s:%s"
         self.FEED_JOB_RUNNING = "feed.running:%s"
@@ -46,11 +51,9 @@ class Thoonk(object):
         self.JOB_STATS = 'jobstats'
         self.NEW_FEED = 'newfeed'
 
-        self.feed_schemas = set(self.FEED_CONFIG, self.FEED_EDIT,
+        self.feed_schemas = set((self.FEED_CONFIG, self.FEED_EDIT,
                 self.FEED_IDS, self.FEED_ITEMS, self.FEED_PUB,
-                self.FEED_PUBS, self.FEED_RETRACT,
-                self.FEED_JOB_STALLED, self.FEED_JOB_FINISHED,
-                self.FEED_JOB_RUNNING)
+                self.FEED_PUBS, self.FEED_RETRACT))
 
         if listen:
             #start listener thread
@@ -76,7 +79,7 @@ class Thoonk(object):
             else:
                 if not config.get('type', False):
                     config['type'] = feedtype
-                return self.create_feed(feed, config, True)
+                return self.create_feed(feed, config)
         setattr(self, feedtype, startclass)
 
     def register_schema(self, schema):
@@ -103,7 +106,7 @@ class Thoonk(object):
                 return FeedDoesNotExist
             pipe = self.redis.pipeline()
             pipe.srem("feeds", feed)
-            for key in [schema % feed for schema in self.feed_schemas]
+            for key in [schema % feed for schema in self.feed_schemas]:
                 pipe.delete(key)
                 self._publish(DELFEED, (feed, self.feedconfig.instance))
             try:
@@ -208,5 +211,5 @@ class Thoonk(object):
 
     def retract_notice(self, feed, id):
         self[feed].event_retract(id)
-        for handler in self.handlers['publish_notice']:
+        for handler in self.handlers['retract_notice']:
             handler(feed, id)

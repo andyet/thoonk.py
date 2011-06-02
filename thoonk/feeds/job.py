@@ -1,3 +1,5 @@
+import time
+
 from thoonk.consts import *
 from thoonk.exceptions import *
 from thoonk.feeds import Queue

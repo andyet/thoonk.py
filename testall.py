@@ -11,20 +11,20 @@ class testoverall(unittest.TestCase):
         import compileall
         import re
         if sys.version_info < (3,0):
-            self.failUnless(compileall.compile_dir('.' + os.sep + 'sleekpubsub', rx=re.compile('/[.]svn'), quiet=True))
+            self.failUnless(compileall.compile_dir('.' + os.sep + 'thoonk', rx=re.compile('/[.]svn'), quiet=True))
         else:
-            self.failUnless(compileall.compile_dir('.' + os.sep + 'sleekpubsub', rx=re.compile('/[.]svn|.*26.*'), quiet=True))
+            self.failUnless(compileall.compile_dir('.' + os.sep + 'thoonk', rx=re.compile('/[.]svn|.*26.*'), quiet=True))
 
     def    testTabNanny(self):
         """Invoking the tabnanny"""
         import tabnanny
-        self.failIf(tabnanny.check("." + os.sep + 'sleekpubsub'))
+        self.failIf(tabnanny.check("." + os.sep + 'thoonk'))
         #raise "Help!"
 
     def disabled_testMethodLength(self):
         """Testing for excessive method lengths"""
         import re
-        dirs = os.walk(sys.path[0] + os.sep + 'sleekpubsub')
+        dirs = os.walk(sys.path[0] + os.sep + 'thoonk')
         offenders = []
         for d in dirs:
             if not '.svn' in d[0]:
@@ -48,7 +48,7 @@ class testoverall(unittest.TestCase):
                                 if line and cur and not line.strip().startswith("#") and not (cur.strip().startswith("try:") and methodindent == 0): #if we weren't all whitespace and weren't a comment
                                     methodlen += 1
         self.failIf(offenders,"\n".join(offenders))
-            
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=100)

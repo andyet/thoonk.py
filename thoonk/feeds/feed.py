@@ -89,14 +89,14 @@ class Feed(object):
             self.redis.watch(FEEDIDS % self.feed)
 
             max = int(self.config.get('max_length', 0))
-            print max
-            delete_ids = self.redis.zrange(FEEDIDS % self.feed, 0, -max)
             pipe = self.redis.pipeline()
-            for id in delete_ids:
-                if id != publish_id:
-                    pipe.zrem(FEEDIDS % self.feed, id)
-                    pipe.hdel(FEEDITEMS % self.feed, id)
-                    pipe.publish(FEEDRETRACT % self.feed, id)
+            if max > 0:
+                delete_ids = self.redis.zrange(FEEDIDS % self.feed, 0, -max)
+                for id in delete_ids:
+                    if id != publish_id:
+                        pipe.zrem(FEEDIDS % self.feed, id)
+                        pipe.hdel(FEEDITEMS % self.feed, id)
+                        pipe.publish(FEEDRETRACT % self.feed, id)
             pipe.zadd(FEEDIDS % self.feed, publish_id, time.time())
             pipe.incr(FEEDPUBS % self.feed)
             pipe.hset(FEEDITEMS % self.feed, publish_id, item)
@@ -105,8 +105,6 @@ class Feed(object):
                 break
             except redis.exceptions.WatchError:
                 pass
-
-        print results
 
         if results[-3]:
             # If zadd was successful
@@ -130,3 +128,5 @@ class Feed(object):
                     return
                 except redis.exceptions.WatchError:
                     pass
+            else:
+                break

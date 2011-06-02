@@ -19,17 +19,17 @@ class TestJob(unittest.TestCase):
         #publisher
         testjob = self.ps.job("testjob")
         id = testjob.put(9.0)
-        
+
         #worker
         testjobworker = self.ps.job("testjob")
         id_worker, query_worker = testjobworker.get(timeout=3)
         result_worker = math.sqrt(float(query_worker))
         testjobworker.finish(id_worker, result_worker, True)
-        
+
         #publisher gets result
         query_publisher, result_publisher = testjob.get_result(id)
         self.assertEqual(float(result_worker), float(result_publisher), "Job results did not match publish.")
-        self.assertEqual(testjob.get_items(), [])
+        self.assertEqual(testjob.get_ids(), [])
 
     def test_20_cancel_job(self):
         j = self.ps.job("testjob")
@@ -46,8 +46,8 @@ class TestJob(unittest.TestCase):
         #cleanup -- remove the job from the queue
         j.retract(id)
         #assert empty
-        self.assertEqual(j.get_items(), [])
+        self.assertEqual(j.get_ids(), [])
 
 
 suite = unittest.TestLoader().loadTestsFromTestCase(TestJob)
-            
+
