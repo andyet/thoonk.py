@@ -27,7 +27,7 @@ class TestJob(unittest.TestCase):
         testjobworker.finish(id_worker, result_worker, True)
 
         #publisher gets result
-        query_publisher, result_publisher = testjob.get_result(id)
+        query_publisher, result_publisher = testjob.get_result(id, 1)
         self.assertEqual(float(result_worker), float(result_publisher), "Job results did not match publish.")
         self.assertEqual(testjob.get_ids(), [])
 
@@ -45,7 +45,6 @@ class TestJob(unittest.TestCase):
         j.cancel(id)
         #cleanup -- remove the job from the queue
         j.retract(id)
-        #assert empty
         self.assertEqual(j.get_ids(), [])
 
 
