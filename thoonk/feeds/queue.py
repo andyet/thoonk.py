@@ -10,19 +10,34 @@ class Queue(Feed):
     class Empty(Exception):
         pass
 
-    def publish(self, item):
-        self.check_feed()
-        pipe = self.redis.pipeline()
-        id = uuid.uuid4().hex
-        pipe.lpush(FEEDIDS % self.feed, id)
-        pipe.hset(FEEDITEMS % self.feed, id, item)
-        pipe.execute()
-        self._publish_number()
-        return id
+    def __init__(self, thoonk, feed, config=None):
+        Feed.__init__(self, thoonk, feed, config)
+        self.NORMAL = 0
+        self.HIGH = 1
 
-    def put(self, item):
+    def publish(self, item, priority=None):
+        self.put(item, priority)
+
+    def put(self, item, priority=None):
         """alias to publish"""
-        return self.publish(item)
+        self.check_feed()
+
+        if priority is None:
+            priority = self.NORMAL
+
+        id = uuid.uuid4().hex
+        pipe = self.redis.pipeline()
+
+        if priority == self.HIGH:
+            pipe.rpush(FEEDIDS % self.feed, id)
+            pipe.hset(FEEDITEMS % self.feed, id, item)
+            pipe.incr(FEEDPUBS % self.feed)
+        else:
+            pipe.lpush(FEEDIDS % self.feed, id)
+            pipe.hset(FEEDITEMS % self.feed, id, item)
+            pipe.incr(FEEDPUBS % self.feed)
+
+        pipe.execute()
 
     def get(self, timeout=0):
         self.check_feed()
@@ -30,12 +45,8 @@ class Queue(Feed):
         if result is None:
             raise self.Empty
         id = result[1]
-        value = self.redis.hget(FEEDITEMS % self.feed, id)
-        self.redis.hdel(FEEDITEMS % self.feed, id)
-        self._publish_number()
-        return value
-
-    def _publish_number(self):
-        #indicates that the length of FEEDIDS has changed
-        #self.redis.publish(FEEDPUB % self.feed, "__size__\x00%d" % self.redis.llen(FEEDIDS % self.feed))
-        pass
+        pipe = self.redis.pipeline()
+        pipe.hget(FEEDITEMS % self.feed, id)
+        pipe.hdel(FEEDITEMS % self.feed, id)
+        results = pipe.execute()
+        return results[0]
