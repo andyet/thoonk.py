@@ -5,26 +5,21 @@ from thoonk.consts import *
 from thoonk.exceptions import *
 from thoonk.feeds import Queue
 
+class JobDoesNotExist(Exception):
+    pass
+
+
+class JobNotPending(Exception):
+    pass
+
 
 class Job(Queue):
-
-    class JobDoesNotExist(Exception):
-        pass
-
-    class JobNotPending(Exception):
-        pass
-
-    def __init__(self, *args, **kwargs):
-        Queue.__init__(self, *args, **kwargs)
 
     def get_channels(self):
         return (FEEDPUB % self.feed, FEEDRETRACT % self.feed)
 
     def event_stalled(self, id, value):
         pass
-
-    def _check_running(self, id):
-        return self.redis.sismember(FEEDJOBRUNNING % self.feed, id)
 
     def get_ids(self):
         self.check_feed()
@@ -64,7 +59,7 @@ class Job(Queue):
             pipe.lpush(FEEDIDS % self.feed, id)
             pipe.incr(FEEDPUBS % self.feed)
             pipe.hset(FEEDITEMS % self.feed, id, item)
-            pipe.zadd(FEEDPUB % self.feed, id, time.time())
+            pipe.zadd(FEEDPUBD % self.feed, id, time.time())
 
         results = pipe.execute()
         return id
@@ -141,7 +136,7 @@ class Job(Queue):
             pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
             pipe.hdel(FEEDCANCELLED % self.feed, id)
             pipe.sadd(FEEDJOBSTALLED % self.feed, id)
-            pipe.zrem(FEEDPUB % self.feed, id)
+            pipe.zrem(FEEDPUBD % self.feed, id)
             try:
                 pipe.execute()
                 break
@@ -159,7 +154,7 @@ class Job(Queue):
             pipe = self.redis.pipeline()
             pipe.srem(FEEDJOBSTALLED % self.feed, id)
             pipe.lpush(FEEDIDS % self.feed, id)
-            pipe.zadd(FEEDPUB % self.feed, time.time(), id)
+            pipe.zadd(FEEDPUBD % self.feed, time.time(), id)
             try:
                 results = pipe.execute()
                 if not results[0]:
