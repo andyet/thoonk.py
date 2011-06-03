@@ -33,6 +33,7 @@ class Thoonk(object):
         self.register_feedtype(u'queue', feeds.Queue)
         self.register_feedtype(u'job', feeds.Job)
         self.register_feedtype(u'pyqueue', feeds.PythonQueue)
+        self.register_feedtype(u'list', feeds.List)
 
         self.FEED_CONFIG = "feed.config:%s"
         self.FEED_EDIT = "feed.edit:%s"

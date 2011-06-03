@@ -1,3 +1,4 @@
+FEEDIDINCR = "feed.idincr:%s"
 FEEDIDS = "feed.ids:%s"
 FEEDITEMS = "feed.items:%s"
 FEEDPUB = "feed.publish:%s"
