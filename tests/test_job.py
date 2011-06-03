@@ -32,6 +32,7 @@ class TestJob(unittest.TestCase):
         self.assertEqual(testjob.get_ids(), [])
 
     def test_20_cancel_job(self):
+        """Test cancelling a job"""
         j = self.ps.job("testjob")
         #publisher
         id = j.put(9.0)
