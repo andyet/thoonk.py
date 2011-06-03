@@ -60,7 +60,16 @@ Feed:
 
 List:
 
-    Publish:
+    Append/Publish:
+        id = INCR feed.idincr:[feed]
+        MULTI
+            RPUSH feed.ids:[feed] [id]
+            HSET feed.items:[feed] [id] [item]
+            INCR feed.publishes:[feed]
+            PUBLISH feed.publish:[feed] [id]\x00[item]
+        EXEC
+
+    Prepend:
         id = INCR feed.idincr:[feed]
         MULTI
             LPUSH feed.ids:[feed] [id]
@@ -71,7 +80,7 @@ List:
 
     Edit:
         WATCH feed.items:[feed]
-        HEXISTS feed.items:[feed] [id] //if not: fail
+        HEXISTS feed.items:[feed] [id] //if not: UNWATCH fail
         MULTI
             HSET feed.items:[feed] [id] [item]
             INCR feed.publishes:[feed]
@@ -80,7 +89,7 @@ List:
 
     Publish Before:
         WATCH feed.items:[feed]
-        HEXISTS feed.items:[feed] [before id] //if not: fail
+        HEXISTS feed.items:[feed] [before id] //if not: UNWATCH fail
         id = INCR feed.idincr:[feed]
         MULTI
             LINSERT feed.ids:[feed] BEFORE [before id] [id]
@@ -91,7 +100,7 @@ List:
     
     Publish After:
         WATCH feed.items:[feed]
-        HEXISTS feed.items:[feed] [after id] //if not: fail
+        HEXISTS feed.items:[feed] [after id] //if not: UNWATCH, fail
         id = INCR feed.idincr:[feed]
         MULTI
             LINSERT feed.ids:[feed] AFTER [after id] [id]
@@ -166,10 +175,10 @@ Job:
         EXEC
 
     Get:
-        id = BRPOPLPUSH feed.ids:[feed] [timeout]
+        id = BRPOP feed.ids:[feed] [timeout]
         //if error/timeout, abort
         MULTI
-            ZADD feed.claimed:[feed] [id] [utc epoch]
+            ZADD feed.claimed:[feed] [utc epoch] [id]
             item = HGET feed:items[feed] [id]
         EXEC
         //if the id fails to get from feed.ids to feed.claimed, the maintenance will notice eventually
@@ -181,13 +190,16 @@ Job:
             ZREM feed.claimed:[feed] [id]
             HDEL feed.cancelled:[feed] [id] //just to make sure
             //optionally if publishing a result:
-                LPUSH feed.jobfinished:[feed]\x00[id] [item]\x00[result]
+                LPUSH feed.jobfinished:[feed]\x00[id] [result]
                 EXPIRE feed.jobfinished:[feed]\x00[id] [timeout]
             HDEL feed.items:[feed] [id]
         EXEC // if nil: go back to WATCH and try again
 
     Get Result:
         BRPOP feed:jobfinished:[feed]\x00[id] [timeout]
+
+    Get Ids:
+        HKEYS feed.items:[feed]
 
     Cancel: //cancel a running job, will get retried
         WATCH feed.claimed:[feed]
@@ -206,17 +218,17 @@ Job:
             HDEL feed.cancelled:[feed] [id]
             SADD feed.stalled:[feed] [id]
             ZREM feed.published:[feed] [id]
-        EXEC
+        EXEC // if nil, retry
 
     Retry: //retry a stalled job
         WATCH feed.stalled:[feed]
-        ZRANGE feed.stalled:[feed] [id] // if nil: fail
+        SISMEMBER feed.stalled:[feed] [id] // if nil: UNWATCH fail
         MULTI
             SREM feed.stalled:[feed] [id]
             //if error, abort
             LPUSH feed.ids:[feed] [id]
             ZADD feed.published:[feed] [utc epoch] [id]
-        EXEC
+        EXEC // if nil retry
 
     Retract:
         WATCH feed.items:[feed]
@@ -230,7 +242,7 @@ Job:
             LREM feed.ids:[feed] 1 [id]
         EXEC // if fail, retry
 
-    Maintenance: //maintain job queue -- only ran by one process per jobqueue on occasion
+    Maintenance: //maintain job queue -- only ran by one process per jobqueue on occassion -- still a bit hand-wavey
         MULTI
             keys = HKEYS feed.items:[feed]
             avail = LRANGE feed.ids:[feed]

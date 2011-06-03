@@ -90,7 +90,7 @@ class Job(Queue):
             pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
             pipe.hdel(FEEDCANCELLED % self.feed, id)
             if result:
-                pipe.lpush(FEEDJOBFINISHED % (self.feed, id), '%s\x00%s' % (query, item))
+                pipe.lpush(FEEDJOBFINISHED % (self.feed, id), item)
                 if timeout is not None:
                     pipe.expire(FEEDJOBFINISHED % (self.feed, id), timeout)
             pipe.hdel(FEEDITEMS % self.feed, id)
@@ -143,7 +143,7 @@ class Job(Queue):
     def retry(self, id):
         while True:
             self.redis.watch(FEEDJOBSTALLED % self.feed)
-            if self.redis.zrange(FEEDJOBSTALLED % self.feed, id) is None:
+            if self.redis.sismember(FEEDJOBSTALLED % self.feed, id) is None:
                 self.redis.unwatch()
                 return # raise exception?
 
