@@ -32,14 +32,9 @@ class Feed(object):
     def event_retract(self, id):
         pass
 
-    def check_feed(self):
-        if not self.thoonk.feed_exists(self.feed):
-            raise FeedDoesNotExist
-
     @property
     def config(self):
         with self.config_lock:
-            self.check_feed()
             if not self.config_valid:
                 conf = self.redis.get(FEEDCONFIG % self.feed)
                 self._config = json.loads(conf)
@@ -55,7 +50,6 @@ class Feed(object):
     @config.deleter
     def config(self):
         with self.config_lock:
-            self.check_feed()
             self.config_valid = False
 
     def delete_feed(self):
@@ -65,11 +59,9 @@ class Feed(object):
     # =================================================================
 
     def get_ids(self):
-        self.check_feed()
         return self.redis.zrange(FEEDIDS % self.feed, 0, -1)
 
     def get_item(self, item=None):
-        self.check_feed()
         if item is None:
             self.redis.hget(FEEDITEMS % self.feed,
                             self.redis.lindex(FEEDIDS % self.feed, 0))
@@ -77,11 +69,9 @@ class Feed(object):
             return self.redis.hget(FEEDITEMS % self.feed, item)
 
     def get_all(self):
-        self.check_feed()
         return self.redis.hgetall(FEEDITEMS % self.feed)
 
     def publish(self, item, id=None):
-        self.check_feed()
         publish_id = id
         if publish_id is None:
             publish_id = uuid.uuid4().hex
@@ -115,7 +105,6 @@ class Feed(object):
         return publish_id
 
     def retract(self, id):
-        self.check_feed()
         while True:
             self.redis.watch(FEEDIDS % self.feed)
             if self.redis.zrank(FEEDIDS % self.feed, id):
@@ -129,4 +118,5 @@ class Feed(object):
                 except redis.exceptions.WatchError:
                     pass
             else:
+                self.redis.unwatch()
                 break

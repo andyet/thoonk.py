@@ -5,6 +5,7 @@ from thoonk.consts import *
 from thoonk.exceptions import *
 from thoonk.feeds import Queue
 
+
 class JobDoesNotExist(Exception):
     pass
 
@@ -22,29 +23,29 @@ class Job(Queue):
         pass
 
     def get_ids(self):
-        self.check_feed()
-        return self.redis.lrange(FEEDIDS % self.feed, 0, -1)
+        return self.redis.hkeys(FEEDITEMS % self.feed)
 
     def retract(self, id):
-        self.check_feed()
         while True:
-            self.redis.watch(FEEDIDS % self.feed)
-            if self.redis.lindex(FEEDIDS % self.feed, id) is not None:
+            self.redis.watch(FEEDITEMS % self.feed)
+            if self.redis.hexists(FEEDITEMS % self.feed, id):
                 pipe = self.redis.pipeline()
-                pipe.lrem(FEEDIDS % self.feed, id)
                 pipe.hdel(FEEDITEMS % self.feed, id)
-                pipe.publish(FEEDRETRACT % self.feed, id)
+                pipe.hdel(FEEDCANCELLED % self.feed, id)
+                pipe.zrem(FEEDPUBD % self.feed, id)
+                pipe.srem(FEEDJOBSTALLED % self.feed, id)
+                pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
+                pipe.lrem(FEEDIDS % self.feed, 1, id)
                 try:
                     pipe.execute()
                     return
                 except redis.exceptions.WatchError:
                     pass
             else:
+                self.redis.unwatch()
                 break
 
     def put(self, item, priority=None):
-        self.check_feed()
-
         if priority is None:
             priority = self.NORMAL
 
@@ -65,7 +66,6 @@ class Job(Queue):
         return id
 
     def get(self, timeout=0):
-        self.check_feed()
         id = self.redis.brpop(FEEDIDS % self.feed, timeout)
         if id is None:
             return # raise exception?
@@ -78,15 +78,14 @@ class Job(Queue):
         return id, result[1]
 
     def finish(self, id, item=None, result=False, timeout=None):
-        self.check_feed()
-
-        self.redis.watch(FEEDJOBCLAIMED % self.feed)
-        if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
-            return # raise exception?
-
-        query = self.redis.hget(FEEDITEMS % self.feed, id)
-
         while True:
+            self.redis.watch(FEEDJOBCLAIMED % self.feed)
+            if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
+                self.redis.unwatch()
+                return # raise exception?
+
+            query = self.redis.hget(FEEDITEMS % self.feed, id)
+
             pipe = self.redis.pipeline()
             pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
             pipe.hdel(FEEDCANCELLED % self.feed, id)
@@ -102,18 +101,17 @@ class Job(Queue):
                 pass
 
     def get_result(self, id, timeout=0):
-        self.check_feed()
         result = self.redis.brpop(FEEDJOBFINISHED % (self.feed, id), timeout)
         if result is not None:
             return result[1].split('\x00')
 
     def cancel(self, id):
-        self.check_feed()
-        self.redis.watch(FEEDJOBCLAIMED % self.feed)
-        if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
-            return # raise exception?
-
         while True:
+            self.redis.watch(FEEDJOBCLAIMED % self.feed)
+            if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
+                self.redis.unwatch()
+                return # raise exception?
+
             pipe = self.redis.pipeline()
             pipe.hincrby(FEEDCANCELLED % self.feed, id, 1)
             pipe.lpush(FEEDIDS % self.feed, id)
@@ -125,13 +123,12 @@ class Job(Queue):
                 pass
 
     def stall(self, id):
-        self.check_feed()
-
-        self.redis.watch(FEEDJOBCLAIMED % self.feed)
-        if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
-            return # raise exception?
-
         while True:
+            self.redis.watch(FEEDJOBCLAIMED % self.feed)
+            if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
+                self.redis.unwatch()
+                return # raise exception?
+
             pipe = self.redis.pipeline()
             pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
             pipe.hdel(FEEDCANCELLED % self.feed, id)
@@ -144,13 +141,12 @@ class Job(Queue):
                 pass
 
     def retry(self, id):
-        self.check_feed()
-
-        self.redis.watch(FEEDJOBSTALLED % self.feed)
-        if self.redis.zrange(FEEDJOBSTALLED % self.feed, id) is None:
-            return # raise exception?
-
         while True:
+            self.redis.watch(FEEDJOBSTALLED % self.feed)
+            if self.redis.zrange(FEEDJOBSTALLED % self.feed, id) is None:
+                self.redis.unwatch()
+                return # raise exception?
+
             pipe = self.redis.pipeline()
             pipe.srem(FEEDJOBSTALLED % self.feed, id)
             pipe.lpush(FEEDIDS % self.feed, id)
@@ -164,7 +160,6 @@ class Job(Queue):
                 pass
 
     def maintenance(self):
-        self.check_feed()
         pipe = self.redis.pipeline()
         pipe.hkeys(FEEDITEMS % self.feed)
         pipe.lrange(FEEDIDS % self.feed)

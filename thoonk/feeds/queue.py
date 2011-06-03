@@ -20,8 +20,6 @@ class Queue(Feed):
 
     def put(self, item, priority=None):
         """alias to publish"""
-        self.check_feed()
-
         if priority is None:
             priority = self.NORMAL
 
@@ -40,7 +38,6 @@ class Queue(Feed):
         pipe.execute()
 
     def get(self, timeout=0):
-        self.check_feed()
         result = self.redis.brpop(FEEDIDS % self.feed, timeout)
         if result is None:
             raise self.Empty
