@@ -103,7 +103,7 @@ class Job(Queue):
     def get_result(self, id, timeout=0):
         result = self.redis.brpop(FEEDJOBFINISHED % (self.feed, id), timeout)
         if result is not None:
-            return result[1].split('\x00')
+            return result
 
     def cancel(self, id):
         while True:
