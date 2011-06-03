@@ -191,7 +191,7 @@ Job:
 
     Cancel: //cancel a running job, will get retried
         WATCH feed.claimed:[feed]
-        ZRANK feed.claimed:[feed] [id] // if nil: fail
+        ZRANK feed.claimed:[feed] [id] // if nil: fail UNWATCH
         MULTI
             HINCRBY feed.cancelled:[feed] [id] 1
             LPUSH feed.ids:[feed] [id]
@@ -217,6 +217,18 @@ Job:
             LPUSH feed.ids:[feed] [id]
             ZADD feed.published:[feed] [utc epoch] [id]
         EXEC
+
+    Retract:
+        WATCH feed.items:[feed]
+        if not HEXISTS feed.items:[feed] [id] // fail UNWATCH
+        MULTI
+            HDEL feed.items:[feed] [id]
+            HDEL feed.cancelled:[feed] [id]
+            ZREM feed.published:[feed] [id]
+            SREM feed.stalled:[feed] [id]
+            ZREM feed.claimed:[feed] [id]
+            LREM feed.ids:[feed] 1 [id]
+        EXEC // if fail, retry
 
     Maintenance: //maintain job queue -- only ran by one process per jobqueue on occasion
         MULTI
