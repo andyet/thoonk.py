@@ -11,21 +11,86 @@ from thoonk.config import ConfigCache
 
 class Thoonk(object):
 
-    def __init__(self, allfeeds=True, host='localhost', port=6379, db=0, listen=False):
-        self.allfeeds = allfeeds
+    """
+    Thoonk provides a set of additional, high level datatypes with feed-like
+    behaviour (feeds, queues, lists, job queues) to Redis. A default Thoonk
+    instance will provide four feed types:
+      feed  -- A simple list of entries sorted by publish date. May be
+               either bounded or bounded in size.
+      queue -- A feed that provides FIFO behaviour. Once an item is pulled
+               from the queue, it is removed.
+      job   -- Similar to a queue, but an item is not removed from the
+               queue after it has been request until a job complete notice
+               is received.
+      list  -- Similar to a normal feed, except that the ordering of items
+               is not limited to publish date, and can be manually adjusted.
+
+    Thoonk.py also provides an additional pyqueue feed type which behaves
+    identically to a queue, except that it pickles/unpickles Python
+    datatypes automatically.
+
+    The core Thoonk class provides infrastructure for creating and
+    managing feeds.
+
+    Attributes:
+        db           -- The Redis database number.
+        feeds        -- A set of known feed names.
+        feedtypes    -- A dictionary mapping feed type names to their
+                        implementation classes.
+        handlers     -- A dictionary mapping event names to event handlers.
+        host         -- The Redis server host.
+        listen_ready -- A thread event indicating when the listening
+                        Redis connection is ready.
+        listening    -- A flag indicating if this Thoonk instance is for
+                        listening to publish events.
+        lredis       -- A Redis connection for listening to publish events.
+        port         -- The Redis server port.
+        redis        -- The Redis connection instance.
+
+    Methods:
+        close             -- Terminate the listening Redis connection.
+        create_feed       -- Create a new feed using a given type and config.
+        create_notice     --
+        delete_feed       -- Remove an existing feed.
+        delete_notice     --
+        feed_exists       -- Determine if a feed has already been created.
+        get_feeds         -- Return the set of active feeds.
+        listen            -- Start the listening Redis connection.
+        publish_notice    --
+        register_feedtype -- Make a new feed type available for use.
+        register_handler  -- Assign a function as an event handler.
+        register_schema   --
+        retract_notice    --
+        set_config        -- Set the configuration for a given feed.
+    """
+
+    def __init__(self, host='localhost', port=6379, db=0, listen=False):
+        """
+        Start a new Thoonk instance for creating and managing feeds.
+
+        Arguments:
+            host   -- The Redis server name.
+            port   -- Port for connecting to the Redis server.
+            db     -- The Redis database to use.
+            listen -- Flag indicating if this Thoonk instance should listen
+                      for feed events and relevant event handlers. Defaults
+                      to False.
+        """
         self.host = host
         self.port = port
         self.db = db
         self.redis = redis.Redis(host=self.host, port=self.port, db=self.db)
         self.lredis = None
+
+        self.feedtypes = {}
+        self.feeds = set()
+        self.feedconfig = ConfigCache(self)
         self.handlers = {
                 'create_notice': [],
                 'delete_notice': [],
                 'publish_notice': [],
                 'retract_notice': []}
-        self.feedtypes = {}
-        self.feeds = set()
-        self.feedconfig = ConfigCache(self)
+
         self.listen_ready = threading.Event()
         self.listening = listen
 
@@ -64,34 +129,106 @@ class Thoonk(object):
             self.listen_ready.wait()
 
     def _publish(self, schema, items):
+        """
+        A shortcut method to publish items separated by \x00.
+
+        Arguments:
+            schema -- The key to publish the items to.
+            items  -- A tuple or list of items to publish.
+        """
         self.redis.publish(schema, "\x00".join(items))
 
     def __getitem__(self, feed):
+        """
+        Return the configuration for a feed.
+
+        Arguments:
+            feed -- The name of the feed.
+
+        Returns: Dict
+        """
         return self.feedconfig[feed]
 
     def __setitem__(self, feed, config):
+        """
+        Set the configuration for a feed.
+
+        Arguments:
+            feed   -- The name of the feed.
+            config -- A dict of config values.
+        """
         self.set_config(feed, config)
 
     def register_feedtype(self, feedtype, klass):
+        """
+        Make a new feed type availabe for use.
+
+        New instances of the feed can be created by using:
+            self.<feedtype>()
+
+        For example: self.pyqueue() or self.job().
+
+        Arguments:
+            feedtype -- The name of the feed type.
+            klass    -- The implementation class for the type.
+        """
         self.feedtypes[feedtype] = klass
-        def startclass(feed, config={}):
+
+        def startclass(feed, config=None):
+            """
+            Instantiate a new feed on demand.
+
+            Arguments:
+                feed -- The name of the new feed.
+                config -- A dictionary of configuration values.
+
+            Returns: Feed of type <feedtype>.
+            """
+            if config is None:
+                config = {}
             if self.feed_exists(feed):
                 return self[feed]
             else:
                 if not config.get('type', False):
                     config['type'] = feedtype
                 return self.create_feed(feed, config)
+
         setattr(self, feedtype, startclass)
 
     def register_schema(self, schema):
         self.feed_schemas.add(schema)
 
     def register_handler(self, name, handler):
+        """
+        Register a function to respond to feed events.
+
+        Event types:
+            - create_notice
+            - delete_notice
+            - publish_notice
+            - retract_notice
+
+        Arguments:
+            name    -- The name of the feed event.
+            handler -- The function for handling the event.
+        """
         if name not in self.handlers:
             self.handlers[name] = []
         self.handlers.append(handler)
 
     def create_feed(self, feed, config):
+        """
+        Create a new feed with a given configuration.
+
+        The configuration is a dict, and should include a 'type'
+        entry with the class of the feed type implementation.
+
+        Arguments:
+            feed   -- The name of the new feed.
+            config -- A dictionary of configuration values.
+        """
+        if config is None:
+            config = {}
         if not self.redis.sadd("feeds", feed):
             raise FeedExists
         self.feeds.add(feed)
@@ -100,6 +237,12 @@ class Thoonk(object):
         return self[feed]
 
     def delete_feed(self, feed):
+        """
+        Delete a given feed.
+
+        Arguments:
+            feed -- The name of the feed.
+        """
         deleted = False
         while not deleted:
             self.redis.watch('feeds')
@@ -116,7 +259,14 @@ class Thoonk(object):
             except redis.exceptions.WatchError:
                 deleted = False
 
-    def set_config (self, feed, config):
+    def set_config(self, feed, config):
+        """
+        Set the configuration for a given feed.
+
+        Arguments:
+            feed   -- The name of the feed.
+            config -- A dictionary of configuration values.
+        """
         if not self.feed_exists(feed):
             raise FeedDoesNotExist
         if type(config) == dict:
@@ -133,9 +283,20 @@ class Thoonk(object):
         self._publish(CONFFEED, (feed, self.feedconfig.instance))
 
     def get_feeds(self):
+        """
+        Return the set of known feeds.
+
+        Returns: set
+        """
         return self.feeds
 
-    def feed_exists(self, feed, check=False):
+    def feed_exists(self, feed):
+        """
+        Check if a given feed exists.
+
+        Arguments:
+            feed -- The name of the feed.
+        """
         if not self.listening:
             if not feed in self.feeds:
                 if self.redis.sismember('feeds', feed):
@@ -147,11 +308,21 @@ class Thoonk(object):
         return feed in self.feeds
 
     def close(self):
+        """Terminate the listening Redis connection."""
         self.redis.connection.disconnect()
         if self.listening:
             self.lredis.connection.disconnect()
 
     def listen(self):
+        """
+        Listen for feed creation and manipulation events and execute
+        relevant event handlers. Specifically, listen for:
+            - Feed creations
+            - Feed deletions
+            - Configuration changes
+            - Item publications.
+            - Item retractions.
+        """
         # listener redis object
         self.lredis = redis.Redis(host=self.host, port=self.port, db=self.db)
 
@@ -198,19 +369,49 @@ class Thoonk(object):
                     self.feedconfig.invalidate(feed, instance)
 
     def create_notice(self, feed):
+        """
+        Generate a notice that a new feed has been created and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed -- The name of the created feed.
+        """
         for handler in self.handlers['create_notice']:
             handler(feed)
 
     def delete_notice(self, feed):
+        """
+        Generate a notice that a feed has been deleted, and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed -- The name of the deleted feed.
+        """
         for handler in self.handlers['delete_notice']:
             handler(feed)
 
     def publish_notice(self, feed, item, id):
+        """
+        Generate a notice that an item has been published to a feed, and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed -- The name of the feed.
+            item -- The content of the published item.
+            id   -- The ID of the published item.
+        """
         self[feed].event_publish(id, item)
         for handler in self.handlers['publish_notice']:
             handler(feed, item, id)
 
     def retract_notice(self, feed, id):
+        """
+        Generate a notice that an item has been retracted from a feed, and
+        execute any relevant event handlers.
+
+        Arguments:
+            id -- The ID of the retracted item.
+        """
         self[feed].event_retract(id)
         for handler in self.handlers['retract_notice']:
             handler(feed, id)
