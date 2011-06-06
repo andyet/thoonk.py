@@ -35,6 +35,7 @@ class Thoonk(object):
     Attributes:
         db           -- The Redis database number.
         feeds        -- A set of known feed names.
+        feedconfig   -- A cache of feed configurations.
         feedtypes    -- A dictionary mapping feed type names to their
                         implementation classes.
         handlers     -- A dictionary mapping event names to event handlers.
@@ -50,17 +51,16 @@ class Thoonk(object):
     Methods:
         close             -- Terminate the listening Redis connection.
         create_feed       -- Create a new feed using a given type and config.
-        create_notice     --
+        create_notice     -- Execute handlers for feed creation event.
         delete_feed       -- Remove an existing feed.
-        delete_notice     --
+        delete_notice     -- Execute handlers for feed deletion event.
         feed_exists       -- Determine if a feed has already been created.
         get_feeds         -- Return the set of active feeds.
         listen            -- Start the listening Redis connection.
-        publish_notice    --
+        publish_notice    -- Execute handlers for item publish event.
         register_feedtype -- Make a new feed type available for use.
         register_handler  -- Assign a function as an event handler.
-        register_schema   --
-        retract_notice    --
+        retract_notice    -- Execute handlers for item retraction event.
         set_config        -- Set the configuration for a given feed.
     """
 
