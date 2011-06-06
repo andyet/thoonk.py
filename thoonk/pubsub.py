@@ -34,7 +34,7 @@ class Thoonk(object):
     Attributes:
         db           -- The Redis database number.
         feeds        -- A set of known feed names.
-        feedconfig   -- A cache of feed configurations.
+        _feed_config   -- A cache of feed configurations.
         feedtypes    -- A dictionary mapping feed type names to their
                         implementation classes.
         handlers     -- A dictionary mapping event names to event handlers.
