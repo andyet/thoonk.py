@@ -18,6 +18,8 @@ class Job(Queue):
     def __init__(self, thoonk, feed, config=None):
         Queue.__init__(self, thoonk, feed, config=None)
 
+        self.feed_published = 'feed.published:%s' % feed
+        self.feed_cancelled = 'feed.cancelled:%s' % feed
         self.feed_job_claimed = 'feed.claimed:%s' % feed
         self.feed_job_stalled = 'feed.stalled:%s' % feed
         self.feed_job_finished = 'feed.finished:%s\x00%s' % (feed, '%s')
@@ -26,7 +28,9 @@ class Job(Queue):
     def get_schemas(self):
         schema = set((self.feed_job_claimed,
                       self.feed_job_stalled,
-                      self.feed_job_running))
+                      self.feed_job_running,
+                      self.feed_published,
+                      self.feed_cancelled))
 
         for id in self.get_ids():
             schema.add(self.feed_job_finished % id)
