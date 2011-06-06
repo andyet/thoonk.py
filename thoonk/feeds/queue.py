@@ -1,6 +1,5 @@
 import uuid
 
-from thoonk.consts import *
 from thoonk.exceptions import *
 from thoonk.feeds import Feed
 
@@ -27,23 +26,23 @@ class Queue(Feed):
         pipe = self.redis.pipeline()
 
         if priority == self.HIGH:
-            pipe.rpush(FEEDIDS % self.feed, id)
-            pipe.hset(FEEDITEMS % self.feed, id, item)
-            pipe.incr(FEEDPUBS % self.feed)
+            pipe.rpush(self.feed_ids, id)
+            pipe.hset(self.feed_items, id, item)
+            pipe.incr(self.feed_publishes % self.feed)
         else:
-            pipe.lpush(FEEDIDS % self.feed, id)
-            pipe.hset(FEEDITEMS % self.feed, id, item)
-            pipe.incr(FEEDPUBS % self.feed)
+            pipe.lpush(self.feed_ids, id)
+            pipe.hset(self.feed_items, id, item)
+            pipe.incr(self.feed_publishes)
 
         pipe.execute()
 
     def get(self, timeout=0):
-        result = self.redis.brpop(FEEDIDS % self.feed, timeout)
+        result = self.redis.brpop(self.feed_ids, timeout)
         if result is None:
             raise self.Empty
         id = result[1]
         pipe = self.redis.pipeline()
-        pipe.hget(FEEDITEMS % self.feed, id)
-        pipe.hdel(FEEDITEMS % self.feed, id)
+        pipe.hget(self.feed_items, id)
+        pipe.hdel(self.feed_items, id)
         results = pipe.execute()
         return results[0]

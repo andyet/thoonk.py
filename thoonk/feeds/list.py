@@ -1,35 +1,43 @@
-from thoonk.consts import *
 from thoonk.exceptions import *
 from thoonk.feeds import *
 
 
 class List(Feed):
 
+    def __init__(self, thoonk, feed, config=None):
+        Feed.__init__(self, thoonk, feed, config)
+
+        self.feed_id_incr = 'feed.idincr:%s' % feed
+
+    def get_schemas(self):
+        schema = set((self.feed_id_incr,))
+        return schema.union(Feed.get_schemas(self))
+
     def append(self, item):
         self.publish(item)
 
     def prepend(self, item):
-        id = self.redis.incr(FEEDIDINCR % self.feed)
+        id = self.redis.incr(self.feed_id_incr)
         pipe = self.redis.pipeline()
-        pipe.lpush(FEEDIDS % self.feed, id)
-        pipe.incr(FEEDPUBS % self.feed)
-        pipe.hset(FEEDITEMS % self.feed, id, item)
-        pipe.publish(FEEDPUB % self.feed, '%s\x00%s' % (id, item))
+        pipe.lpush(self.feed_ids, id)
+        pipe.incr(self.feed_publishes)
+        pipe.hset(self.feed_items, id, item)
+        pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
         pipe.execute()
         return id
 
     def __insert(self, item, rel_id, method):
-        id = self.redis.incr(FEEDIDINCR % self.feed)
+        id = self.redis.incr(self.feed_id_incr)
         while True:
-            self.redis.watch(FEEDITEMS % self.feed)
-            if not self.redis.hexists(FEEDITEMS % self.feed, rel_id):
+            self.redis.watch(self.feed_items)
+            if not self.redis.hexists(self.feed_items, rel_id):
                 self.redis.unwatch()
                 return # raise exception?
 
             pipe = self.redis.pipeline()
-            pipe.linsert(FEEDIDS % self.feed, method, rel_id, id)
-            pipe.hset(FEEDITEMS % self.feed, id, item)
-            pipe.publish(FEEDPUB % self.feed, '%s\x00%s' % (id, item))
+            pipe.linsert(self.feed_ids, method, rel_id, id)
+            pipe.hset(self.feed_items, id, item)
+            pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
 
             try:
                 pipe.execute()
@@ -38,26 +46,26 @@ class List(Feed):
                 pass
 
     def publish(self, item):
-        id = self.redis.incr(FEEDIDINCR % self.feed)
+        id = self.redis.incr(self.feed_id_incr)
         pipe = self.redis.pipeline()
-        pipe.rpush(FEEDIDS % self.feed, id)
-        pipe.incr(FEEDPUBS % self.feed)
-        pipe.hset(FEEDITEMS % self.feed, id, item)
-        pipe.publish(FEEDPUB % self.feed, '%s\x00%s' % (id, item))
+        pipe.rpush(self.feed_ids, id)
+        pipe.incr(self.feed_publishes)
+        pipe.hset(self.feed_items, id, item)
+        pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
         pipe.execute()
         return id
 
     def edit(self, id, item):
         while True:
-            self.redis.watch(FEEDITEMS % self.feed)
-            if not self.redis.hexists(FEEDITEMS % self.feed, id):
+            self.redis.watch(self.feed_items)
+            if not self.redis.hexists(self.feed_items, id):
                 self.redis.unwatch()
                 return # raise exception?
 
             pipe = self.redis.pipeline()
-            pipe.hset(FEEDITEMS % self.feed, id, item)
-            pipe.incr(FEEDPUBS % self.feed)
-            pipe.publish(FEEDPUB % self.feed, '%s\x00%s' % (id, item))
+            pipe.hset(self.feed_items, id, item)
+            pipe.incr(self.feed_publishes)
+            pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
 
             try:
                 pipe.execute()
@@ -73,12 +81,12 @@ class List(Feed):
 
     def retract(self, id):
         while True:
-            self.redis.watch(FEEDITEMS % self.feed)
-            if self.redis.hexists(FEEDITEMS % self.feed, id):
+            self.redis.watch(self.feed_items)
+            if self.redis.hexists(self.feed_items, id):
                 pipe = self.redis.pipeline()
-                pipe.lrem(FEEDIDS % self.feed, id, 1)
-                pipe.hdel(FEEDITEMS % self.feed, id)
-                pipe.publish(FEEDRETRACT % self.feed, id)
+                pipe.lrem(self.feed_ids, id, 1)
+                pipe.hdel(self.feed_items, id)
+                pipe.publish(self.feed_retract, id)
                 try:
                     pipe.execute()
                     break
@@ -89,10 +97,10 @@ class List(Feed):
                 return
 
     def get_ids(self):
-        return self.redis.lrange(FEEDIDS % self.feed, 0, -1)
+        return self.redis.lrange(self.feed_ids, 0, -1)
 
     def get_item(self, id):
-        return self.redis.hget(FEEDITEMS % self.feed, id)
+        return self.redis.hget(self.feed_items, id)
 
     def get_items(self):
-        return self.redis.hgetall(FEEDITEMS % self.feed)
+        return self.redis.hgetall(self.feed_items)

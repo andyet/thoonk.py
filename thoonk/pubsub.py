@@ -4,7 +4,6 @@ import threading
 import uuid
 
 from thoonk import feeds
-from thoonk.consts import *
 from thoonk.exceptions import *
 from thoonk.config import ConfigCache
 
@@ -84,7 +83,7 @@ class Thoonk(object):
 
         self.feedtypes = {}
         self.feeds = set()
-        self.feedconfig = ConfigCache(self)
+        self._feed_config = ConfigCache(self)
         self.handlers = {
                 'create_notice': [],
                 'delete_notice': [],
@@ -94,32 +93,18 @@ class Thoonk(object):
         self.listen_ready = threading.Event()
         self.listening = listen
 
+        self.feed_publish = 'feed.publish:%s'
+        self.feed_retract = 'feed.retract:%s'
+        self.feed_config = 'feed.config:%s'
+        self.conf_feed = 'conffeed'
+        self.new_feed = 'newfeed'
+        self.del_feed = 'delfeed'
+
         self.register_feedtype(u'feed', feeds.Feed)
         self.register_feedtype(u'queue', feeds.Queue)
         self.register_feedtype(u'job', feeds.Job)
         self.register_feedtype(u'pyqueue', feeds.PythonQueue)
         self.register_feedtype(u'list', feeds.List)
-
-        self.FEED_CONFIG = "feed.config:%s"
-        self.FEED_EDIT = "feed.edit:%s"
-        self.FEED_IDS = "feed.ids:%s"
-        self.FEED_ITEMS = "feed.items:%s"
-        self.FEED_PUB = "feed.publish:%s"
-        self.FEED_PUBS = "feed.publishes:%s"
-        self.FEED_RETRACT = "feed.retract:%s"
-
-        self.FEED_JOB_STALLED = "feed.stalled:%s"
-        self.FEED_JOB_FINISHED = "feed.finished:%s:%s"
-        self.FEED_JOB_RUNNING = "feed.running:%s"
-
-        self.CONF_FEED = 'conffeed'
-        self.DEL_FEED = 'delfeed'
-        self.JOB_STATS = 'jobstats'
-        self.NEW_FEED = 'newfeed'
-
-        self.feed_schemas = set((self.FEED_CONFIG, self.FEED_EDIT,
-                self.FEED_IDS, self.FEED_ITEMS, self.FEED_PUB,
-                self.FEED_PUBS, self.FEED_RETRACT))
 
         if listen:
             #start listener thread
@@ -147,7 +132,7 @@ class Thoonk(object):
 
         Returns: Dict
         """
-        return self.feedconfig[feed]
+        return self._feed_config[feed]
 
     def __setitem__(self, feed, config):
         """
@@ -195,9 +180,6 @@ class Thoonk(object):
 
         setattr(self, feedtype, startclass)
 
-    def register_schema(self, schema):
-        self.feed_schemas.add(schema)
-
     def register_handler(self, name, handler):
         """
         Register a function to respond to feed events.
@@ -233,7 +215,7 @@ class Thoonk(object):
             raise FeedExists
         self.feeds.add(feed)
         self.set_config(feed, config)
-        self._publish(NEWFEED, (feed, self.feedconfig.instance))
+        self._publish(self.new_feed, (feed, self._feed_config.instance))
         return self[feed]
 
     def delete_feed(self, feed):
@@ -243,6 +225,7 @@ class Thoonk(object):
         Arguments:
             feed -- The name of the feed.
         """
+        feed_instance = self._feed_config[feed]
         deleted = False
         while not deleted:
             self.redis.watch('feeds')
@@ -250,9 +233,9 @@ class Thoonk(object):
                 return FeedDoesNotExist
             pipe = self.redis.pipeline()
             pipe.srem("feeds", feed)
-            for key in [schema % feed for schema in self.feed_schemas]:
+            for key in feed_instance.get_schemas():
                 pipe.delete(key)
-                self._publish(DELFEED, (feed, self.feedconfig.instance))
+                self._publish(self.del_feed, (feed, self._feed_config.instance))
             try:
                 pipe.execute()
                 deleted = True
@@ -279,8 +262,8 @@ class Thoonk(object):
             if u'type' not in dconfig:
                 dconfig[u'type'] = u'feed'
             jconfig = json.dumps(dconfig)
-        self.redis.set(FEEDCONFIG % feed, jconfig)
-        self._publish(CONFFEED, (feed, self.feedconfig.instance))
+        self.redis.set(self.feed_config % feed, jconfig)
+        self._publish(self.conf_feed, (feed, self._feed_config.instance))
 
     def get_feeds(self):
         """
@@ -327,7 +310,7 @@ class Thoonk(object):
         self.lredis = redis.Redis(host=self.host, port=self.port, db=self.db)
 
         # subscribe to feed activities channel
-        self.lredis.subscribe((NEWFEED, DELFEED, CONFFEED))
+        self.lredis.subscribe((self.new_feed, self.del_feed, self.conf_feed))
 
         # get set of feeds
         self.feeds.update(self.redis.smembers('feeds'))
@@ -347,14 +330,14 @@ class Thoonk(object):
                 elif event['channel'].startswith('feed.retract'):
                     self.retract_notice(event['channel'].split(':', 1)[-1],
                                         event['data'])
-                elif event['channel'] == NEWFEED:
+                elif event['channel'] == self.new_feed:
                     #feed created event
                     name, instance = event['data'].split('\x00')
                     self.feeds.add(name)
-                    self.lredis.subscribe((FEEDPUB % name,
-                                           FEEDRETRACT % name))
+                    self.lredis.subscribe((self.feed_publish % name,
+                                           self.feed_retract % name))
                     self.create_notice(name)
-                elif event['channel'] == DELFEED:
+                elif event['channel'] == self.del_feed:
                     #feed destroyed event
                     name, instance = event['data'].split('\x00')
                     try:
@@ -362,11 +345,11 @@ class Thoonk(object):
                     except KeyError:
                         #already removed -- probably locally
                         pass
-                    self.feedconfig.invalidate(name, instance, delete=True)
+                    self._feed_config.invalidate(name, instance, delete=True)
                     self.delete_notice(name)
-                elif event['channel'] == CONFFEED:
+                elif event['channel'] == self.conf_feed:
                     feed, instance = event['data'].split('\x00', 1)
-                    self.feedconfig.invalidate(feed, instance)
+                    self._feed_config.invalidate(feed, instance)
 
     def create_notice(self, feed):
         """

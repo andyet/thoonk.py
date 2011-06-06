@@ -1,7 +1,6 @@
 import time
 import uuid
 
-from thoonk.consts import *
 from thoonk.exceptions import *
 from thoonk.feeds import Queue
 
@@ -16,26 +15,45 @@ class JobNotPending(Exception):
 
 class Job(Queue):
 
+    def __init__(self, thoonk, feed, config=None):
+        Queue.__init__(self, thoonk, feed, config=None)
+
+        self.feed_job_claimed = 'feed.claimed:%s' % feed
+        self.feed_job_stalled = 'feed.stalled:%s' % feed
+        self.feed_job_finished = 'feed.finished:%s\x00%s' % (feed, '%s')
+        self.feed_job_running = 'feed.running:%s' % feed
+
+    def get_schemas(self):
+        schema = set((self.feed_job_claimed,
+                      self.feed_job_stalled,
+                      self.feed_job_running))
+
+        for id in self.get_ids():
+            schema.add(self.feed_job_finished % id)
+
+        return schema.union(Queue.get_schemas(self))
+
     def get_channels(self):
-        return (FEEDPUB % self.feed, FEEDRETRACT % self.feed)
+        return (self.feed_publish, self.feed_retract)
 
     def event_stalled(self, id, value):
         pass
 
     def get_ids(self):
-        return self.redis.hkeys(FEEDITEMS % self.feed)
+        return self.redis.hkeys(self.feed_items)
 
     def retract(self, id):
         while True:
-            self.redis.watch(FEEDITEMS % self.feed)
-            if self.redis.hexists(FEEDITEMS % self.feed, id):
+            self.redis.watch(self.feed_items)
+            if self.redis.hexists(self.feed_items, id):
                 pipe = self.redis.pipeline()
-                pipe.hdel(FEEDITEMS % self.feed, id)
-                pipe.hdel(FEEDCANCELLED % self.feed, id)
-                pipe.zrem(FEEDPUBD % self.feed, id)
-                pipe.srem(FEEDJOBSTALLED % self.feed, id)
-                pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
-                pipe.lrem(FEEDIDS % self.feed, 1, id)
+                pipe.hdel(self.feed_items, id)
+                pipe.hdel(self.feed_cancelled, id)
+                pipe.zrem(self.feed_published, id)
+                pipe.srem(self.feed_job_stalled, id)
+                pipe.zrem(self.feed_job_claimed, id)
+                pipe.lrem(self.feed_ids, 1, id)
+                pipe.delete(self.feed_job_finished % id)
                 try:
                     pipe.execute()
                     return
@@ -53,47 +71,47 @@ class Job(Queue):
         pipe = self.redis.pipeline()
 
         if priority == self.HIGH:
-            pipe.rpush(FEEDIDS % self.feed, id)
-            pipe.hset(FEEDITEMS % self.feed, id, item)
-            pipe.zadd(FEEDPUBS % self.feed, id, time.time())
+            pipe.rpush(self.feed_ids, id)
+            pipe.hset(self.feed_items, id, item)
+            pipe.zadd(self.feed_publishes, id, time.time())
         else:
-            pipe.lpush(FEEDIDS % self.feed, id)
-            pipe.incr(FEEDPUBS % self.feed)
-            pipe.hset(FEEDITEMS % self.feed, id, item)
-            pipe.zadd(FEEDPUBD % self.feed, id, time.time())
+            pipe.lpush(self.feed_ids, id)
+            pipe.incr(self.feed_publishes)
+            pipe.hset(self.feed_items, id, item)
+            pipe.zadd(self.feed_published, id, time.time())
 
         results = pipe.execute()
         return id
 
     def get(self, timeout=0):
-        id = self.redis.brpop(FEEDIDS % self.feed, timeout)
+        id = self.redis.brpop(self.feed_ids, timeout)
         if id is None:
             return # raise exception?
         id = id[1]
 
         pipe = self.redis.pipeline()
-        pipe.zadd(FEEDJOBCLAIMED % self.feed, id, time.time())
-        pipe.hget(FEEDITEMS % self.feed, id)
+        pipe.zadd(self.feed_job_claimed, id, time.time())
+        pipe.hget(self.feed_items, id)
         result = pipe.execute()
         return id, result[1]
 
     def finish(self, id, item=None, result=False, timeout=None):
         while True:
-            self.redis.watch(FEEDJOBCLAIMED % self.feed)
-            if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
+            self.redis.watch(self.feed_job_claimed)
+            if self.redis.zrank(self.feed_job_claimed, id) is None:
                 self.redis.unwatch()
                 return # raise exception?
 
-            query = self.redis.hget(FEEDITEMS % self.feed, id)
+            query = self.redis.hget(self.feed_items, id)
 
             pipe = self.redis.pipeline()
-            pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
-            pipe.hdel(FEEDCANCELLED % self.feed, id)
+            pipe.zrem(self.feed_job_claimed, id)
+            pipe.hdel(self.feed_cancelled, id)
             if result:
-                pipe.lpush(FEEDJOBFINISHED % (self.feed, id), item)
+                pipe.lpush(self.feed_job_finished % id, item)
                 if timeout is not None:
-                    pipe.expire(FEEDJOBFINISHED % (self.feed, id), timeout)
-            pipe.hdel(FEEDITEMS % self.feed, id)
+                    pipe.expire(self.feed_job_finished % id, timeout)
+            pipe.hdel(self.feed_items, id)
             try:
                 result = pipe.execute()
                 break
@@ -101,21 +119,21 @@ class Job(Queue):
                 pass
 
     def get_result(self, id, timeout=0):
-        result = self.redis.brpop(FEEDJOBFINISHED % (self.feed, id), timeout)
+        result = self.redis.brpop(self.feed_job_finished % id, timeout)
         if result is not None:
             return result
 
     def cancel(self, id):
         while True:
-            self.redis.watch(FEEDJOBCLAIMED % self.feed)
-            if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
+            self.redis.watch(self.feed_job_claimed)
+            if self.redis.zrank(self.feed_job_claimed, id) is None:
                 self.redis.unwatch()
                 return # raise exception?
 
             pipe = self.redis.pipeline()
-            pipe.hincrby(FEEDCANCELLED % self.feed, id, 1)
-            pipe.lpush(FEEDIDS % self.feed, id)
-            pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
+            pipe.hincrby(self.feed_cancelled, id, 1)
+            pipe.lpush(self.feed_ids, id)
+            pipe.zrem(self.feed_job_claimed, id)
             try:
                 pipe.execute()
                 break
@@ -124,16 +142,16 @@ class Job(Queue):
 
     def stall(self, id):
         while True:
-            self.redis.watch(FEEDJOBCLAIMED % self.feed)
-            if self.redis.zrank(FEEDJOBCLAIMED % self.feed, id) is None:
+            self.redis.watch(self.feed_job_claimed)
+            if self.redis.zrank(self.feed_job_claimed, id) is None:
                 self.redis.unwatch()
                 return # raise exception?
 
             pipe = self.redis.pipeline()
-            pipe.zrem(FEEDJOBCLAIMED % self.feed, id)
-            pipe.hdel(FEEDCANCELLED % self.feed, id)
-            pipe.sadd(FEEDJOBSTALLED % self.feed, id)
-            pipe.zrem(FEEDPUBD % self.feed, id)
+            pipe.zrem(self.feed_job_claimed, id)
+            pipe.hdel(self.feed_cancelled, id)
+            pipe.sadd(self.feed_job_stalled, id)
+            pipe.zrem(self.feed_published, id)
             try:
                 pipe.execute()
                 break
@@ -142,15 +160,15 @@ class Job(Queue):
 
     def retry(self, id):
         while True:
-            self.redis.watch(FEEDJOBSTALLED % self.feed)
-            if self.redis.sismember(FEEDJOBSTALLED % self.feed, id) is None:
+            self.redis.watch(self.feed_job_stalled)
+            if self.redis.sismember(self.feed_job_stalled, id) is None:
                 self.redis.unwatch()
                 return # raise exception?
 
             pipe = self.redis.pipeline()
-            pipe.srem(FEEDJOBSTALLED % self.feed, id)
-            pipe.lpush(FEEDIDS % self.feed, id)
-            pipe.zadd(FEEDPUBD % self.feed, time.time(), id)
+            pipe.srem(self.feed_job_stalled, id)
+            pipe.lpush(self.feed_ids, id)
+            pipe.zadd(self.feed_published, time.time(), id)
             try:
                 results = pipe.execute()
                 if not results[0]:
@@ -161,10 +179,10 @@ class Job(Queue):
 
     def maintenance(self):
         pipe = self.redis.pipeline()
-        pipe.hkeys(FEEDITEMS % self.feed)
-        pipe.lrange(FEEDIDS % self.feed)
-        pipe.zrange(FEEDJOBCLAIMED % self.feed, 0, -1)
-        pipe.stall = pipe.smembers(FEEDJOBSTALLED % self.feed)
+        pipe.hkeys(self.feed_items)
+        pipe.lrange(self.feed_ids)
+        pipe.zrange(self.feed_job_claimed, 0, -1)
+        pipe.stall = pipe.smembers(self.feed_job_stalled)
 
         keys, avail, claim, stall = pipe.execute()
 
@@ -172,4 +190,4 @@ class Job(Queue):
                                                key not in claim and \
                                                key not in stall)]
         for key in unaccounted:
-            self.redis.lpush(FEEDIDS % self.feed, key)
+            self.redis.lpush(self.feed_ids, key)
