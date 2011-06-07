@@ -159,18 +159,18 @@ class Feed(object):
         """Return the set of IDs used by items in the feed."""
         return self.redis.zrange(self.feed_ids, 0, -1)
 
-    def get_item(self, item=None):
+    def get_item(self, id=None):
         """
         Retrieve a single item from the feed.
 
         Arguments:
-            item --
+            id -- The ID of the item to retrieve.
         """
-        if item is None:
+        if id is None:
             self.redis.hget(self.feed_items,
                             self.redis.lindex(self.feed_ids, 0))
         else:
-            return self.redis.hget(self.feed_items, item)
+            return self.redis.hget(self.feed_items, id)
 
     def get_all(self):
         """Return all items from the feed."""
@@ -178,6 +178,18 @@ class Feed(object):
 
     def publish(self, item, id=None):
         """
+        Publish an item to the feed, or replace an existing item.
+
+        Newly published items will be at the top of the feed, while
+        edited items will remain in their original order.
+
+        If the feed has a max length, then the oldest entries will
+        be removed to maintain the maximum length.
+
+        Arguments:
+            item -- The content of the item to add to the feed.
+            id   -- Optional ID to use for the item, if the ID already
+                    exists, the existing item will be replaced.
         """
         publish_id = id
         if publish_id is None:

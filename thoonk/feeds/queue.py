@@ -4,21 +4,70 @@ from thoonk.exceptions import *
 from thoonk.feeds import Feed
 
 
+class Empty(Exception):
+    pass
+
+
 class Queue(Feed):
 
-    class Empty(Exception):
-        pass
+    """
+    A Thoonk queue is a typical FIFO structure, but with an
+    optional priority override for inserting to the head
+    of the queue.
+
+    Attributes:
+        NORMAL -- Normal priority value for published items.
+        HIGH   -- High priority value for published items.
+
+    Thoonk Standard API:
+        publish -- Alias for put()
+        put     -- Add an item to the queue, with optional priority.
+        get     -- Retrieve the next item from the queue.
+    """
 
     def __init__(self, thoonk, feed, config=None):
+        """
+        Create a new Queue object for a given Thoonk feed.
+
+        Note: More than one Queue objects may be create for the same
+              Thoonk feed, and creating a Queue object does not
+              automatically generate the Thoonk feed itself.
+
+        Arguments:
+            thoonk -- The main Thoonk object.
+            feed   -- The name of the feed.
+            config -- Optional dictionary of configuration values.
+        """
         Feed.__init__(self, thoonk, feed, config)
         self.NORMAL = 0
         self.HIGH = 1
 
     def publish(self, item, priority=None):
+        """
+        Add a new item to the queue.
+
+        (Same as self.put())
+
+        Arguments:
+            item     -- The content to add to the queue.
+            priority -- Optional priority; if equal to self.HIGH then
+                        the item will be inserted at the head of the
+                        queue instead of the end.
+        """
         self.put(item, priority)
 
     def put(self, item, priority=None):
-        """alias to publish"""
+        """
+        Add a new item to the queue.
+
+        (Same as self.publish())
+
+        Arguments:
+            item     -- The content to add to the queue (string).
+            priority -- Optional priority; if equal to self.HIGH then
+                        the item will be inserted at the head of the
+                        queue instead of the end.
+        """
         if priority is None:
             priority = self.NORMAL
 
@@ -35,14 +84,26 @@ class Queue(Feed):
             pipe.incr(self.feed_publishes)
 
         pipe.execute()
+        return id
 
     def get(self, timeout=0):
+        """
+        Retrieve the next item from the queue.
+
+        Raises an Empty exception if the request times out.
+
+        Arguments:
+            timeout -- Optional time in seconds to wait before
+                       raising an exception.
+        """
         result = self.redis.brpop(self.feed_ids, timeout)
         if result is None:
-            raise self.Empty
+            raise Empty
+
         id = result[1]
         pipe = self.redis.pipeline()
         pipe.hget(self.feed_items, id)
         pipe.hdel(self.feed_items, id)
         results = pipe.execute()
+
         return results[0]
