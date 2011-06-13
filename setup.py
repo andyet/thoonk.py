@@ -35,8 +35,7 @@ CLASSIFIERS      = [ 'Intended Audience :: Developers',
                      'Topic :: Software Development :: Libraries :: Python Modules',
                    ]
 
-packages     = [ 'thoonk',
-                 ]
+packages     = [ 'thoonk', 'thoonk/feeds' ]
 
 
 setup(

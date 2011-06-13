@@ -8,6 +8,20 @@ class TestLeaf(unittest.TestCase):
         self.ps = thoonk.Pubsub(db=10)
         self.ps.redis.flushdb()
 
+    def test_05_basic_retract(self):
+        """Test adding and retracting an item."""
+        l = self.ps.feed("testfeed")
+        l.publish('foo', id='1')
+        r = l.get_ids()
+        v = l.get_all()
+        self.assertEqual(r, ['1'], "Feed results did not match publish: %s." % r)
+        self.assertEqual(v, {'1': 'foo'}, "Feed contents did not match publish: %s." % r)
+        l.retract('1')
+        r = l.get_ids()
+        v = l.get_all()
+        self.assertEqual(r, [], "Feed results did not match: %s." % r)
+        self.assertEqual(v, {}, "Feed contents did not match: %s." % r)
+
     def test_10_basic_feed(self):
         """Test basic LEAF publish and retrieve."""
         l = self.ps.feed("testfeed")

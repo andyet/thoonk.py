@@ -232,7 +232,7 @@ class Feed(object):
         """
         while True:
             self.redis.watch(self.feed_ids)
-            if self.redis.zrank(self.feed_ids, id):
+            if self.redis.zrank(self.feed_ids, id) is not None:
                 pipe = self.redis.pipeline()
                 pipe.zrem(self.feed_ids, id)
                 pipe.hdel(self.feed_items, id)
