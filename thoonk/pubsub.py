@@ -196,7 +196,7 @@ class Thoonk(object):
         """
         if name not in self.handlers:
             self.handlers[name] = []
-        self.handlers.append(handler)
+        self.handlers[name].append(handler)
 
     def create_feed(self, feed, config):
         """
