@@ -22,12 +22,18 @@ passing messages between users, taking input from and serving multiple APIs
 simultaneously, and generally persisting and pushing data around.
 
 ## Queue ##
+
 Queues are stored and interacted with in similar ways to feeds, except instead
 of publishes being broadcast, clients may do a "blocking get" to claim an item,
 ensuring that they're the only one to get it. When an item is delivered, it is
 deleted from the queue.
 
 Queues are useful for direct message passing.
+
+## List ##
+
+Lists are unbounded, manually ordered collections of items. Lists behave similarly
+to plain feeds except that items may be edited in place or inserted in arbitrary order.
 
 ## Job ##
 
@@ -81,10 +87,11 @@ reconfiguring it if you specify a configuration.
 
     test_feed = thoonk.feed(feed_name)
 
-The same is true for Queues and Jobs
+The same is true for queues, jobs, and lists:
     
-    test_queue = thoonk.queue(QueueName);
-    test_job = thoonk.job(JobName);
+    test_queue = thoonk.queue('queue name')
+    test_job = thoonk.job('job channel name')
+    test_list = thoonk.list('list name')
 
 ## Configuring a Feed ##
 
