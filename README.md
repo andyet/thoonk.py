@@ -101,19 +101,37 @@ The same is true for Queues and Jobs
 
 ### Publishing to a Feed ###
 
+Publishing to a feed adds an item to the end of the feed, sorted by publish time.
+
     feed.publish('item contents', id='optional id')
 
+Editing an existing item in the feed can be done by publishing with the same ID as
+the item to replace. The edited version will be moved to the end of the feed.
+
 ### Retracting an Item ###
+
+Removing an item is done through retraction, which simply requires the ID of the
+item to remove.
 
     feed.retract('item id')
 
 ### Retrieving a List of Item IDs ###
+
+Retrieving all of the IDs in the feed provides the order in which items appear.
    
     item_ids = feed.get_ids()
 
 ### Retrieve a Dictionary of All Items ###
 
+Retrieving a dictionary of all items, keyed by item ID is doable using:
+
     items = feed.get_all()
+
+#### Iterating over items in published order ####
+
+    items = feed.get_all()
+    for id in feed.get_ids():
+        do_stuff_with(items[id])
 
 ### Retrieving a Specific Item ###
 
