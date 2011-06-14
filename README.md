@@ -149,6 +149,7 @@ A single item may be retrieved from the feed if its ID is known.
 ### Publishing To a Queue ###
 
     queue.put('item')
+    queue.put('priority item', priority=queue.HIGH)
 
 ### Popping a Queue ###
 
