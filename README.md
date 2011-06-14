@@ -166,26 +166,53 @@ Retrieving a dictionary of all items, keyed by item ID is doable using:
 
 ### Cancelling a Job Claim ###
 
+Cancelling a job is done by a worker who has claimed the job. Cancellation relinquishes the claim to
+the job and puts it back in the queue to be given to another worker.
+
     job.cancel('job id')
 
 ### Stalling a Job ###
+
+Stalling a job removes it from the queue to prevent it from executing, but does not completely
+delete it. A stalled job is effectively paused, waiting for whatever issue that required the
+stall to be resolved.
 
     job.stall('job id')
 
 ### Retrying a Stalled Job ###
 
+Once a job jas been stalled, it can be retried once the issue requiring stalling has been
+resolved.
+
     job.retry('job id')
 
 ### Retracting a Job ###
+
+Retracting a job completely removes it from the queue, preventing it from being executed.
 
     job.retract('job id')
 
 ### Finishing a Job ###
 
+Finishing a job can be donw three ways. The first is as a simple acknowledgment that the task
+has been completed.
+
+    job.finish('job id')
+
+The second is when there is result data that should be returned to the job owner. The `result=True`
+parameter is used since it is possible for `None` to be an actual job result.
+
     job.finish('job id', 'result contents', result=True)
+
+It may also be desired to only keep job results around for a short period of time. In which case,
+a timeout parameter may be added.
+
     job.finish('job id', 'result contents', result=True, timeout=5)
 
 ### Check Job Results ###
+
+Checking the result of a job can require knowing what the original job request actually was.
+Thus, the `get_result` method will return both values.
 
     query, result = job.get_result('job id', timeout=5)
 
