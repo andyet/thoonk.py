@@ -49,6 +49,7 @@ setup(
     license      = 'MIT',
     platforms    = [ 'any' ],
     packages     = packages,
+    scripts      = ['scripts/thoonk-cli'],
     py_modules   = [],
     requires     = [],
     )
