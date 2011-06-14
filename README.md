@@ -108,6 +108,9 @@ Publishing to a feed adds an item to the end of the feed, sorted by publish time
 Editing an existing item in the feed can be done by publishing with the same ID as
 the item to replace. The edited version will be moved to the end of the feed.
 
+Since IDs are unique within the feed, it is possible to use a feed as a basic set
+structure by only working the IDs and not with the item contents.
+
 ### Retracting an Item ###
 
 Removing an item is done through retraction, which simply requires the ID of the
@@ -135,6 +138,8 @@ Retrieving a dictionary of all items, keyed by item ID is doable using:
 
 ### Retrieving a Specific Item ###
 
+A single item may be retrieved from the feed if its ID is known.
+
     item = feed.get_item('item id')
 
 ## Using a Queue ##
@@ -152,14 +157,24 @@ Retrieving a dictionary of all items, keyed by item ID is doable using:
 
 ## Using a Job Feed ##
 
+A job feed is a queue of individual jobs; there is no inherent relationship between jobs from the
+same job feed.
+
     job = thoonk.job('job_feed')
 
 ### Publishing a Job ###
+
+Creating new jobs is done by putting them in the job queue. New items are placed at the end of the
+queue, but it is possible to insert high priority jobs at the front.
 
     job.put('job contents')
     job.put('priority job', priority=job.HIGH)
 
 ### Claiming a Job ###
+
+Workers may pull jobs from the queue by claiming them using the `get()` method. The default behaviour
+is to block indefinitely while waiting for a job, but a timeout value in seconds may be supplied
+instead.
 
     data = job.get()
     timed_data = job.get(timeout=5)
@@ -194,7 +209,7 @@ Retracting a job completely removes it from the queue, preventing it from being 
 
 ### Finishing a Job ###
 
-Finishing a job can be donw three ways. The first is as a simple acknowledgment that the task
+Finishing a job can be done in three ways. The first is as a simple acknowledgment that the task
 has been completed.
 
     job.finish('job id')
