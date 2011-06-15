@@ -133,7 +133,7 @@ class Feed(object):
             config -- A dictionary of configuration values.
         """
         with self.config_lock:
-            self.thoonk.set_feed_config(self.feed, config)
+            self.thoonk.set_config(self.feed, config)
             self.config_valid = False
 
     @config.deleter

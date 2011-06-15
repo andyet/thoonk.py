@@ -60,5 +60,32 @@ class TestLeaf(unittest.TestCase):
         l = ps.feed("test2")
         l.delete_feed()
 
+    def test_50_max_length(self):
+        """Test feeds with a max length"""
+        feed = self.ps.feed('testfeed2', {'max_length': 5})
+        feed.publish('item-1', id='1')
+        feed.publish('item-2', id='2')
+        feed.publish('item-3', id='3')
+        feed.publish('item-4', id='4')
+        feed.publish('item-5', id='5')
+        items = feed.get_all()
+        expected = {
+            '1': 'item-1',
+            '2': 'item-2',
+            '3': 'item-3',
+            '4': 'item-4',
+            '5': 'item-5'
+        }
+        self.assertEqual(expected, items,
+                "Items don't match: %s" % items)
+
+        feed2 = self.ps.feed('testfeed2')
+        feed2.publish('item-6', id='6')
+        items = feed2.get_all()
+        del expected['1']
+        expected['6'] = 'item-6'
+        self.assertEqual(expected, items,
+                "Maxed items don't match: %s" % items)
+
 
 suite = unittest.TestLoader().loadTestsFromTestCase(TestLeaf)
