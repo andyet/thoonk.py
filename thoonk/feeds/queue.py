@@ -15,34 +15,13 @@ class Queue(Feed):
     optional priority override for inserting to the head
     of the queue.
 
-    Attributes:
-        NORMAL -- Normal priority value for published items.
-        HIGH   -- High priority value for published items.
-
     Thoonk Standard API:
         publish -- Alias for put()
         put     -- Add an item to the queue, with optional priority.
         get     -- Retrieve the next item from the queue.
     """
 
-    def __init__(self, thoonk, feed, config=None):
-        """
-        Create a new Queue object for a given Thoonk feed.
-
-        Note: More than one Queue objects may be create for the same
-              Thoonk feed, and creating a Queue object does not
-              automatically generate the Thoonk feed itself.
-
-        Arguments:
-            thoonk -- The main Thoonk object.
-            feed   -- The name of the feed.
-            config -- Optional dictionary of configuration values.
-        """
-        Feed.__init__(self, thoonk, feed, config)
-        self.NORMAL = 0
-        self.HIGH = 1
-
-    def publish(self, item, priority=None):
+    def publish(self, item, priority=False):
         """
         Add a new item to the queue.
 
@@ -50,13 +29,13 @@ class Queue(Feed):
 
         Arguments:
             item     -- The content to add to the queue.
-            priority -- Optional priority; if equal to self.HIGH then
+            priority -- Optional priority; if equal to True then
                         the item will be inserted at the head of the
                         queue instead of the end.
         """
         self.put(item, priority)
 
-    def put(self, item, priority=None):
+    def put(self, item, priority=False):
         """
         Add a new item to the queue.
 
@@ -64,17 +43,14 @@ class Queue(Feed):
 
         Arguments:
             item     -- The content to add to the queue (string).
-            priority -- Optional priority; if equal to self.HIGH then
+            priority -- Optional priority; if equal to True then
                         the item will be inserted at the head of the
                         queue instead of the end.
         """
-        if priority is None:
-            priority = self.NORMAL
-
         id = uuid.uuid4().hex
         pipe = self.redis.pipeline()
 
-        if priority == self.HIGH:
+        if priority:
             pipe.rpush(self.feed_ids, id)
             pipe.hset(self.feed_items, id, item)
             pipe.incr(self.feed_publishes % self.feed)

@@ -136,7 +136,7 @@ class Job(Queue):
                 self.redis.unwatch()
                 break
 
-    def put(self, item, priority=None):
+    def put(self, item, priority=False):
         """
         Add a new job to the queue.
 
@@ -144,17 +144,14 @@ class Job(Queue):
 
         Arguments:
             item     -- The content to add to the queue (string).
-            priority -- Optional priority; if equal to self.HIGH then
+            priority -- Optional priority; if equal to True then
                         the item will be inserted at the head of the
                         queue instead of the end.
         """
-        if priority is None:
-            priority = self.NORMAL
-
         id = uuid.uuid4().hex
         pipe = self.redis.pipeline()
 
-        if priority == self.HIGH:
+        if priority:
             pipe.rpush(self.feed_ids, id)
             pipe.hset(self.feed_items, id, item)
             pipe.zadd(self.feed_publishes, id, time.time())
