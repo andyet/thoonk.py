@@ -196,7 +196,7 @@ class SortedFeed(Feed):
             :42    -- Move before existing item ID 42.
             42:    -- Move after existing item ID 42.
             begin: -- Move to beginning of the feed.
-            :end   -- MOve to the end of the feed.
+            :end   -- Move to the end of the feed.
 
         Arguments:
             rel_position -- A formatted ID to move before/after.

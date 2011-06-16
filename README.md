@@ -197,6 +197,40 @@ After an existing item.
 
     sorted_feed.publish_after('existing id', 'new item')
 
+### Moving an Item in a Sorted Feed ###
+
+Moving items is done in relation to existing item IDs in the feed.
+
+To move an item to the beginning:
+
+    sorted_feed.move_first('item id')
+
+To move it to the end of the feed:
+
+    sorted_feed.move_last('item id')
+
+To move an item before an existing item:
+
+    sorted_feed.move_before('existing id', 'item id')
+
+And to move an item after an existing item:
+
+    sorted_feed.move_after('existing id', 'item id')
+
+You can also use `sorted_feed.move()` which uses a specially formatted
+relative ID.
+
+Specifying the new location for the item is done using:
+- `:42`    -- Move before existing item ID 42.
+- `42:`    -- Move after existing item ID 42.
+- `begin:` -- Move to beginning of the feed.
+- `:end`   -- Move to the end of the feed.
+
+    sorted_feed.move(':42', 'item id')
+    sorted_feed.move('42:', 'item id')
+    sorted_feed.move('begin:', 'item id')
+    sorted_feed.move(':end', 'item id')
+
 ## Using a Queue ##
 
     queue = thoonk.queue('queue_feed')
