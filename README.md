@@ -326,8 +326,6 @@ Thus, the `get_result` method will return both values.
 
 # The Future of Thoonk #
 
-* Reposition/move command for Sorted Feeds
-* Position event for Sorted Feeds
 * Examples and functions for Job Maintainance
 * Live Sets
 * Live Queries of Feeds based on Live Sets
