@@ -58,7 +58,7 @@ Feed:
         HGETALL feed.items:[feed]
 
 
-List:
+Sorted Feed:
 
     Append/Publish:
         id = INCR feed.idincr:[feed]

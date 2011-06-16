@@ -12,17 +12,18 @@ class Thoonk(object):
 
     """
     Thoonk provides a set of additional, high level datatypes with feed-like
-    behaviour (feeds, queues, lists, job queues) to Redis. A default Thoonk
-    instance will provide four feed types:
-      feed  -- A simple list of entries sorted by publish date. May be
-               either bounded or bounded in size.
-      queue -- A feed that provides FIFO behaviour. Once an item is pulled
-               from the queue, it is removed.
-      job   -- Similar to a queue, but an item is not removed from the
-               queue after it has been request until a job complete notice
-               is received.
-      list  -- Similar to a normal feed, except that the ordering of items
-               is not limited to publish date, and can be manually adjusted.
+    behaviour (feeds, queues, sorted feeds, job queues) to Redis. A default
+    Thoonk instance will provide four feed types:
+      feed       -- A simple list of entries sorted by publish date. May be
+                    either bounded or bounded in size.
+      queue      -- A feed that provides FIFO behaviour. Once an item is
+                    pulled from the queue, it is removed.
+      job        -- Similar to a queue, but an item is not removed from the
+                    queue after it has been request until a job complete
+                    notice is received.
+      sorted feed -- Similar to a normal feed, except that the ordering of
+                     items is not limited to publish date, and can be
+                     manually adjusted.
 
     Thoonk.py also provides an additional pyqueue feed type which behaves
     identically to a queue, except that it pickles/unpickles Python
@@ -104,7 +105,7 @@ class Thoonk(object):
         self.register_feedtype(u'queue', feeds.Queue)
         self.register_feedtype(u'job', feeds.Job)
         self.register_feedtype(u'pyqueue', feeds.PythonQueue)
-        self.register_feedtype(u'list', feeds.List)
+        self.register_feedtype(u'sorted_feed', feeds.SortedFeed)
 
         if listen:
             #start listener thread

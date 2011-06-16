@@ -30,10 +30,11 @@ deleted from the queue.
 
 Queues are useful for direct message passing.
 
-## List ##
+## Sorted Feed ##
 
-Lists are unbounded, manually ordered collections of items. Lists behave similarly
-to plain feeds except that items may be edited in place or inserted in arbitrary order.
+Sorted feeds are unbounded, manually ordered collections of items. Sorted feeds
+behave similarly to plain feeds except that items may be edited in place or
+inserted in arbitrary order.
 
 ## Job ##
 
