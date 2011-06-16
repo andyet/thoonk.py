@@ -221,6 +221,7 @@ You can also use `sorted_feed.move()` which uses a specially formatted
 relative ID.
 
 Specifying the new location for the item is done using:
+
 - `:42`    -- Move before existing item ID 42.
 - `42:`    -- Move after existing item ID 42.
 - `begin:` -- Move to beginning of the feed.
