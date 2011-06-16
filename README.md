@@ -150,6 +150,38 @@ A single item may be retrieved from the feed if its ID is known.
 
     item = feed.get_item('item id')
 
+## Using a Sorted Feed ##
+
+A sorted feed is similar to a normal feed, except that the ordering of the
+items can be modified, and there is no bound on the number of items.
+
+Sorted feeds do not automatically rearrange items for you, ordering is
+performed manually.
+
+    sorted_feed = thoonk.sorted_feed('sortedfeed_name')
+
+### Inserting an Item in a Sorted Feed ###
+
+Inserting an item may be done in four places:
+
+1. At the beginning of the feed.
+
+    sorted_feed.prepend('new first item')
+
+2. At the end of the feed.
+
+    sorted_feed.append('new last item')
+    # OR
+    sorted_feed.publish('new last item')
+
+3. Before an existing item.
+
+    sorted_feed.publish_before('existing id', 'new item')
+
+4. After an existing item.
+
+    sorted_feed.publish_after('existing id', 'new item')
+
 ## Using a Queue ##
 
     queue = thoonk.queue('queue_feed')
