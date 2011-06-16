@@ -164,11 +164,11 @@ performed manually.
 
 Inserting an item may be done in four places:
 
-1. At the beginning of the feed.
+- At the beginning of the feed.
 
     sorted_feed.prepend('new first item')
 
-2. At the end of the feed.
+- At the end of the feed.
 
     sorted_feed.append('new last item')
 
@@ -176,11 +176,11 @@ Or,
 
     sorted_feed.publish('new last item')
 
-3. Before an existing item.
+- Before an existing item.
 
     sorted_feed.publish_before('existing id', 'new item')
 
-4. After an existing item.
+- After an existing item.
 
     sorted_feed.publish_after('existing id', 'new item')
 
