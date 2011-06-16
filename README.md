@@ -227,6 +227,8 @@ Specifying the new location for the item is done using:
 - `begin:` -- Move to beginning of the feed.
 - `:end`   -- Move to the end of the feed.
 
+As so:
+
     sorted_feed.move(':42', 'item id')
     sorted_feed.move('42:', 'item id')
     sorted_feed.move('begin:', 'item id')
