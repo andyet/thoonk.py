@@ -76,8 +76,10 @@ from the main directory.
 
 ## Initializing ##
 
-    import thoonk
-    pubsub = thoonk.Thoonk(host, port, db)
+Listen mode is off by default. Turn it on if you want to get live events.
+
+    from thoonk import Thoonk
+    pubsub = Thoonk(host, port, db, listen=True)
 
 ## Creating a Feed ##
 
@@ -102,6 +104,20 @@ The same is true for queues, jobs, and lists:
 
 * type: feed/queue/job
 * max\_length: maximum number of items to keep in a feed
+
+## Subscribing to a Feed ##
+    
+    thoonk.register_handler("create_notice", create_handler_pointer)
+    //args: feedname
+
+    thoonk.register_handler("delete_notice", delete_handler_pointer)
+    //args: feedname
+
+    thoonk.register_handler("publish_notice", publish_handler_pointer)
+    //args: feedname, item, id
+
+    thoonk.register_handler("retract_notice", retract_handler_pointer)
+    //args: feedname, id
 
 ## Using a Feed ##
 
@@ -273,4 +289,16 @@ Thus, the `get_result` method will return both values.
 
 # The Future of Thoonk #
 
+* Reposition/move command for Sorted Feeds
+* Position event for Sorted Feeds
+* Examples and functions for Job Maintainance
+* Live Sets
+* Live Queries of Feeds based on Live Sets
+* Advanced "Job Requirements" Job Feed
+* Lots of examples of clustering, distributing concerns, and tools.
+* SleekPubsub2 (XMPP XEP-0600 Publish-Subscribe) process to interact with your feeds.
+* More implementations like Ruby, Java, C, .NET -- please contribute!
+
 # Writing Your Own Implementation or Peer #
+
+See contract.txt for generating your own implementation that will work with Thoonk.py and Thoonk.js.
