@@ -83,3 +83,7 @@ class Queue(Feed):
         results = pipe.execute()
 
         return results[0]
+
+    def get_ids(self):
+        """Return the set of IDs used by jobs in the queue."""
+        return self.redis.lrange(self.feed_ids, 0, -1)

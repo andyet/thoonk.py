@@ -155,6 +155,9 @@ Queue:
             HDEL feed.items:feed [id]
         EXEC
 
+    Get IDs:
+        LRANGE feed.ids:[feed] 0 -1
+
 Job:
 
     Normal Priority Put:
