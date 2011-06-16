@@ -8,10 +8,13 @@ class SortedFeed(Feed):
     A Thoonk sorted feed is a manually ordered collection of items.
 
     Redis Keys Used:
-        feed.idincr:[feed] -- A counter for ID values.
+        feed.idincr:[feed]  -- A counter for ID values.
+        feed.publish:[feed] -- A channel for publishing item position
+                               change events.
 
     Thoonk.py Implementation API:
-        get_schemas -- Return the set of Redis keys used by this feed.
+        get_channels -- Return the standard pubsub channels for this feed.
+        get_schemas  -- Return the set of Redis keys used by this feed.
 
     Thoonk Standard API:
         append    -- Append an item to the end of the feed.
@@ -43,6 +46,13 @@ class SortedFeed(Feed):
         Feed.__init__(self, thoonk, feed, config)
 
         self.feed_id_incr = 'feed.idincr:%s' % feed
+        self.feed_position = 'feed.position:%s' % feed
+
+    def get_channels(self):
+        """
+        Return the Redis key channels for publishing and retracting items.
+        """
+        return (self.feed_publish, self.feed_retract, self.feed_position)
 
     def get_schemas(self):
         """Return the set of Redis keys used exclusively by this feed."""
@@ -73,6 +83,7 @@ class SortedFeed(Feed):
         pipe.incr(self.feed_publishes)
         pipe.hset(self.feed_items, id, item)
         pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
+        pipe.publish(self.feed_position, '%s\x00%s' % (id, 'begin:'))
         pipe.execute()
         return id
 
@@ -99,6 +110,11 @@ class SortedFeed(Feed):
             pipe.linsert(self.feed_ids, method, rel_id, id)
             pipe.hset(self.feed_items, id, item)
             pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
+            if method == 'BEFORE':
+                rel_id = ':%s' % rel_id
+            else:
+                rel_id = '%s:' % rel_id
+            pipe.publish(self.feed_position, '%s\x00%s' % (id, rel_id))
 
             try:
                 pipe.execute()
@@ -122,6 +138,7 @@ class SortedFeed(Feed):
         pipe.incr(self.feed_publishes)
         pipe.hset(self.feed_items, id, item)
         pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
+        pipe.publish(self.feed_position, '%s\x00%s' % (id, ':end'))
         pipe.execute()
         return id
 
@@ -169,6 +186,70 @@ class SortedFeed(Feed):
             item     -- The item contents to add.
         """
         return self.__insert(item, after_id, 'AFTER')
+
+    def move(self, rel_position, id):
+        """
+        Move an existing item to before or after an existing item.
+
+        Specifying the new location for the item is done by:
+
+            :42    -- Move before existing item ID 42.
+            42:    -- Move after existing item ID 42.
+            begin: -- Move to beginning of the feed.
+            :end   -- MOve to the end of the feed.
+
+        Arguments:
+            rel_position -- A formatted ID to move before/after.
+            id           -- The ID of the item to move.
+        """
+        if rel_position[0] == ':':
+            dir = 'BEFORE'
+            rel_id = rel_position[1:]
+        elif rel_position[-1] == ':':
+            dir = 'AFTER'
+            rel_id = rel_position[:-1]
+        else:
+            raise ValueError('Relative ID formatted incorrectly')
+
+        while True:
+            self.redis.watch(self.feed_items)
+            if not self.redis.hexists(self.feed_items, id):
+                self.redis.unwatch()
+                break
+            if rel_id not in ['begin', 'end'] and \
+               not self.redis.hexists(self.feed_items, rel_id):
+                self.redis.unwatch()
+                break
+
+            pipe = self.redis.pipeline()
+            pipe.lrem(self.feed_ids, id, 1)
+            if rel_id == 'begin':
+                pipe.lpush(self.feed_ids, id)
+            elif rel_id == 'end':
+                pipe.rpush(self.feed_ids, id)
+            else:
+                pipe.linsert(self.feed_ids, dir, rel_id, id)
+
+            pipe.publish(self.feed_position,
+                         '%s\x00%s' % (id, rel_position))
+
+            try:
+                pipe.execute()
+                break
+            except redis.exceptions.WatchError:
+                pass
+
+    def move_before(self, rel_id, id):
+        self.move(':%s' % rel_id, id)
+
+    def move_after(self, rel_id, id):
+        self.move('%s:' % rel_id, id)
+
+    def move_first(self, id):
+        self.move('begin:', id)
+
+    def move_last(self, id):
+        self.move(':end', id)
 
     def retract(self, id):
         """

@@ -84,5 +84,29 @@ class TestLeaf(unittest.TestCase):
         self.assertEqual(r, ['7', '1', '2', '5', '6', '4'],
                 "Sorted feed results don't match: %s" % r)
 
+    def test_70_sorted_feed_move(self):
+        """Test moving items around in the feed."""
+        l = self.ps.sorted_feed('testfeed')
+        l.move_first('6')
+        r = l.get_ids()
+        self.assertEqual(r, ['6', '7', '1', '2', '5', '4'],
+                "Sorted feed results don't match: %s" % r)
+
+        l.move_last('7')
+        r = l.get_ids()
+        self.assertEqual(r, ['6', '1', '2', '5', '4', '7'],
+                "Sorted feed results don't match: %s" % r)
+
+
+        l.move_before('2', '5')
+        r = l.get_ids()
+        self.assertEqual(r, ['6', '1', '5', '2', '4', '7'],
+                "Sorted feed results don't match: %s" % r)
+
+        l.move_after('1', '4')
+        r = l.get_ids()
+        self.assertEqual(r, ['6', '1', '4', '5', '2', '7'],
+                "Sorted feed results don't match: %s" % r)
+
 
 suite = unittest.TestLoader().loadTestsFromTestCase(TestLeaf)

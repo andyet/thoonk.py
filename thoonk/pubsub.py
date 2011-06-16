@@ -89,7 +89,8 @@ class Thoonk(object):
                 'create_notice': [],
                 'delete_notice': [],
                 'publish_notice': [],
-                'retract_notice': []}
+                'retract_notice': [],
+                'position_notice': []}
 
         self.listen_ready = threading.Event()
         self.listening = listen
@@ -190,6 +191,7 @@ class Thoonk(object):
             - delete_notice
             - publish_notice
             - retract_notice
+            - position_notice
 
         Arguments:
             name    -- The name of the feed event.
@@ -331,6 +333,9 @@ class Thoonk(object):
                 elif event['channel'].startswith('feed.retract'):
                     self.retract_notice(event['channel'].split(':', 1)[-1],
                                         event['data'])
+                elif event['channel'].startswith('feed.position'):
+                    self.position_notice(event['channel'].split(':', 1)[-1],
+                                         event['data'])
                 elif event['channel'] == self.new_feed:
                     #feed created event
                     name, instance = event['data'].split('\x00')
@@ -394,8 +399,23 @@ class Thoonk(object):
         execute any relevant event handlers.
 
         Arguments:
-            id -- The ID of the retracted item.
+            feed -- The name of the feed.
+            id   -- The ID of the retracted item.
         """
         self[feed].event_retract(id)
         for handler in self.handlers['retract_notice']:
             handler(feed, id)
+
+    def position_notice(self, feed, id, rel_id):
+        """
+        Generate a notice that an item has been moved, and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed   -- The name of the feed.
+            id     -- The ID of the moved item.
+            rel_id -- Where the item was moved, in relation to
+                      existing items.
+        """
+        for handler in self.handlers['position_notice']:
+            handler(feed, id, rel_id)
