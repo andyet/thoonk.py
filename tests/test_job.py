@@ -1,11 +1,25 @@
 import thoonk
 import unittest
 import math
+from ConfigParser import ConfigParser
+
 
 class TestJob(unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
+
+        conf = ConfigParser()
+        conf.read('test.cfg')
+        if conf.sections() == ['Test']:
+            self.ps = thoonk.Thoonk(host=conf.get('Test', 'host'),
+                                    port=conf.getint('Test', 'port'),
+                                    db=conf.getint('Test', 'db'))
+            self.ps.redis.flushdb()
+        else:
+            print 'No test configuration found in test.cfg'
+            exit()
+
 
     def setUp(self):
         self.ps = thoonk.Pubsub(db=10, listen=True)

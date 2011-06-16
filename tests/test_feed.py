@@ -1,12 +1,23 @@
 import thoonk
 import unittest
+from ConfigParser import ConfigParser
+
 
 class TestLeaf(unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
-        self.ps = thoonk.Pubsub(db=10)
-        self.ps.redis.flushdb()
+
+        conf = ConfigParser()
+        conf.read('test.cfg')
+        if conf.sections() == ['Test']:
+            self.ps = thoonk.Thoonk(host=conf.get('Test', 'host'),
+                                    port=conf.getint('Test', 'port'),
+                                    db=conf.getint('Test', 'db'))
+            self.ps.redis.flushdb()
+        else:
+            print 'No test configuration found in test.cfg'
+            exit()
 
     def test_05_basic_retract(self):
         """Test adding and retracting an item."""
@@ -55,9 +66,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_40_create_delete(self):
         """Testing feed delete"""
-        ps = thoonk.Pubsub(db=10)
-        ps.redis.flushdb()
-        l = ps.feed("test2")
+        l = self.ps.feed("test2")
         l.delete_feed()
 
     def test_50_max_length(self):
