@@ -171,7 +171,9 @@ Inserting an item may be done in four places:
 2. At the end of the feed.
 
     sorted_feed.append('new last item')
-    # OR
+
+Or,
+
     sorted_feed.publish('new last item')
 
 3. Before an existing item.
