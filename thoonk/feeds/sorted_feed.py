@@ -1,3 +1,8 @@
+"""
+    Written by Nathan Fritz and Lance Stout. Copyright 2011 by &yet, LLC.
+    Released under the terms of the MIT License
+"""
+
 from thoonk.exceptions import *
 from thoonk.feeds import *
 
@@ -240,15 +245,41 @@ class SortedFeed(Feed):
                 pass
 
     def move_before(self, rel_id, id):
+        """
+        Move an existing item to before an existing item.
+
+        Arguments:
+            rel_id -- An existing item ID.
+            id     -- The ID of the item to move.
+        """
         self.move(':%s' % rel_id, id)
 
     def move_after(self, rel_id, id):
+        """
+        Move an existing item to after an existing item.
+
+        Arguments:
+            rel_id -- An existing item ID.
+            id     -- The ID of the item to move.
+        """
         self.move('%s:' % rel_id, id)
 
     def move_first(self, id):
+        """
+        Move an existing item to the start of the feed.
+
+        Arguments:
+            id     -- The ID of the item to move.
+        """
         self.move('begin:', id)
 
     def move_last(self, id):
+        """
+        Move an existing item to the end of the feed.
+
+        Arguments:
+            id     -- The ID of the item to move.
+        """
         self.move(':end', id)
 
     def retract(self, id):

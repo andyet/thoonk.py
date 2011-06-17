@@ -1,3 +1,8 @@
+"""
+    Written by Nathan Fritz and Lance Stout. Copyright 2011 by &yet, LLC.
+    Released under the terms of the MIT License
+"""
+
 import json
 import threading
 import time
