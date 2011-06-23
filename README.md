@@ -61,7 +61,7 @@ the hiredis package as well, since it should significantly increase performance.
 Since the redis package is undergoing refactoring with backwards incompatible
 changes, be sure to use version 2.2.4.
 
-    pip install redis=2.2.4
+    pip install redis==2.2.4
     pip install hiredis
 
 ## Running the Tests ##
