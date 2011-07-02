@@ -70,7 +70,7 @@ class TestJob(unittest.TestCase):
 
     def test_30_no_job(self):
         j = self.ps.job("testjob")
-        self.assertRaises(Exception, j.get, timeout=1)
+        self.assertRaises(thoonk.feeds.queue.Empty, j.get, timeout=1)
         
 suite = unittest.TestLoader().loadTestsFromTestCase(TestJob)
 
