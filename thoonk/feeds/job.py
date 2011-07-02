@@ -8,6 +8,7 @@ import uuid
 
 from thoonk.exceptions import *
 from thoonk.feeds import Queue
+from thoonk.feeds.queue import Empty
 
 
 class JobDoesNotExist(Exception):
@@ -186,7 +187,7 @@ class Job(Queue):
         """
         id = self.redis.brpop(self.feed_ids, timeout)
         if id is None:
-            return # raise exception?
+            raise Empty
         id = id[1]
 
         pipe = self.redis.pipeline()

@@ -68,6 +68,9 @@ class TestJob(unittest.TestCase):
         j.retract(id)
         self.assertEqual(j.get_ids(), [])
 
-
+    def test_30_no_job(self):
+        j = self.ps.job("testjob")
+        self.assertRaises(Exception, j.get, timeout=1)
+        
 suite = unittest.TestLoader().loadTestsFromTestCase(TestJob)
 
