@@ -194,7 +194,7 @@ class Job(Queue):
         pipe.hget(self.feed_items, id)
         pipe.hget(self.feed_cancelled, id)
         result = pipe.execute()
-        return id, result[1], int(result[2]) if isinstance(result[2], basestring) else 0
+        return id, result[1], 0 if result[2] is None else int(result[2])
 
     def finish(self, id, item=None, result=False, timeout=None):
         """
