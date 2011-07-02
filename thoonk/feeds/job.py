@@ -178,6 +178,11 @@ class Job(Queue):
         Arguments:
             timeout -- Optional time in seconds to wait before
                        raising an exception.
+        
+        Returns:
+            id      -- The id of the job
+            job     -- The job content
+            cancelled -- The number of times the job has been cancelled
         """
         id = self.redis.brpop(self.feed_ids, timeout)
         if id is None:
@@ -187,8 +192,9 @@ class Job(Queue):
         pipe = self.redis.pipeline()
         pipe.zadd(self.feed_job_claimed, id, time.time())
         pipe.hget(self.feed_items, id)
+        pipe.hget(self.feed_cancelled, id)
         result = pipe.execute()
-        return id, result[1]
+        return id, result[1], int(result[2]) if isinstance(result[2], basestring) else 0
 
     def finish(self, id, item=None, result=False, timeout=None):
         """

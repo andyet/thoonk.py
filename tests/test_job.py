@@ -36,7 +36,7 @@ class TestJob(unittest.TestCase):
 
         #worker
         testjobworker = self.ps.job("testjob")
-        id_worker, query_worker = testjobworker.get(timeout=3)
+        id_worker, query_worker, cancelled = testjobworker.get(timeout=3)
         result_worker = math.sqrt(float(query_worker))
         testjobworker.finish(id_worker, result_worker, True)
 
@@ -51,13 +51,19 @@ class TestJob(unittest.TestCase):
         #publisher
         id = j.put(9.0)
         #worker claims
-        id, query = j.get()
+        id, query, cancelled = j.get()
+        self.assertEqual(cancelled, 0)
         #publisher or worker cancels
         j.cancel(id)
-        id2, query2 = j.get()
+        id2, query2, cancelled2 = j.get()
+        self.assertEqual(cancelled2, 1)
         self.assertEqual(id, id2)
         #cancel the work again
         j.cancel(id)
+        # check the cancelled increment again
+        id3, query3, cancelled3 = j.get()
+        self.assertEqual(cancelled3, 2)
+        self.assertEqual(id, id3)
         #cleanup -- remove the job from the queue
         j.retract(id)
         self.assertEqual(j.get_ids(), [])
