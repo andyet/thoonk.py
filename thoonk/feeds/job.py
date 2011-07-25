@@ -5,6 +5,7 @@
 
 import time
 import uuid
+import redis
 
 from thoonk.exceptions import *
 from thoonk.feeds import Queue
@@ -56,7 +57,7 @@ class Job(Queue):
         feed.cancelled:[feed] -- A hash table of cancelled jobs.
         feed.claimed:[feed]   -- A hash table of claimed jobs.
         feed.stalled:[feed]   -- A hash table of stalled jobs.
-        feeed.funning:[feed]  -- A hash table of running jobs.
+        feed.running:[feed]   -- A hash table of running jobs.
         feed.finished:[feed]\x00[id] -- Temporary queue for receiving job
                                         result data.
 
@@ -91,24 +92,30 @@ class Job(Queue):
         """
         Queue.__init__(self, thoonk, feed, config=None)
 
-        self.feed_published = 'feed.published:%s' % feed
+        #self.feed_publish = 'feed.publish:%s' % feed
         self.feed_cancelled = 'feed.cancelled:%s' % feed
+        self.feed_retried = 'feed.retried:%s' % feed
+        self.feed_finished = 'feed.finished:%s' % feed
         self.feed_job_claimed = 'feed.claimed:%s' % feed
         self.feed_job_stalled = 'feed.stalled:%s' % feed
         self.feed_job_finished = 'feed.finished:%s\x00%s' % (feed, '%s')
         self.feed_job_running = 'feed.running:%s' % feed
+
+    def get_channels(self):
+        return (self.feed_publish, self.feed_job_claimed, self.feed_job_stalled,
+            self.feed_finished, self.feed_cancelled, self.feed_retried)
 
     def get_schemas(self):
         """Return the set of Redis keys used exclusively by this feed."""
         schema = set((self.feed_job_claimed,
                       self.feed_job_stalled,
                       self.feed_job_running,
-                      self.feed_published,
+                      self.feed_publish,
                       self.feed_cancelled))
 
         for id in self.get_ids():
             schema.add(self.feed_job_finished % id)
-
+        
         return schema.union(Queue.get_schemas(self))
 
     def get_ids(self):
@@ -128,7 +135,7 @@ class Job(Queue):
                 pipe = self.redis.pipeline()
                 pipe.hdel(self.feed_items, id)
                 pipe.hdel(self.feed_cancelled, id)
-                pipe.zrem(self.feed_published, id)
+                pipe.zrem(self.feed_publish, id)
                 pipe.srem(self.feed_job_stalled, id)
                 pipe.zrem(self.feed_job_claimed, id)
                 pipe.lrem(self.feed_ids, 1, id)
@@ -165,9 +172,16 @@ class Job(Queue):
             pipe.lpush(self.feed_ids, id)
             pipe.incr(self.feed_publishes)
             pipe.hset(self.feed_items, id, item)
-            pipe.zadd(self.feed_published, id, time.time())
+            pipe.zadd(self.feed_publish, id, time.time())
 
         results = pipe.execute()
+
+        if results[-1]:
+            # If zadd was successful
+            self.thoonk._publish(self.feed_publish, (id, item))
+        else:
+            self.thoonk._publish(self.feed_edit, (id, item))
+
         return id
 
     def get(self, timeout=0):
@@ -195,6 +209,9 @@ class Job(Queue):
         pipe.hget(self.feed_items, id)
         pipe.hget(self.feed_cancelled, id)
         result = pipe.execute()
+        
+        self.thoonk._publish(self.feed_job_claimed, (id,))
+
         return id, result[1], 0 if result[2] is None else int(result[2])
 
     def finish(self, id, item=None, result=False, timeout=None):
@@ -226,7 +243,8 @@ class Job(Queue):
                     pipe.expire(self.feed_job_finished % id, timeout)
             pipe.hdel(self.feed_items, id)
             try:
-                result = pipe.execute()
+                pipe.execute()
+                self.thoonk._publish(self.feed_finished, (id, result if result else ""))
                 break
             except redis.exceptions.WatchError:
                 pass
@@ -263,6 +281,7 @@ class Job(Queue):
             pipe.zrem(self.feed_job_claimed, id)
             try:
                 pipe.execute()
+                self.thoonk._publish(self.feed_cancelled, (id,))
                 break
             except redis.exceptions.WatchError:
                 pass
@@ -286,9 +305,10 @@ class Job(Queue):
             pipe.zrem(self.feed_job_claimed, id)
             pipe.hdel(self.feed_cancelled, id)
             pipe.sadd(self.feed_job_stalled, id)
-            pipe.zrem(self.feed_published, id)
+            pipe.zrem(self.feed_publish, id)
             try:
                 pipe.execute()
+                self.thoonk._publish(self.feed_job_stalled, (id,))
                 break
             except redis.exceptions.WatchError:
                 pass
@@ -309,9 +329,10 @@ class Job(Queue):
             pipe = self.redis.pipeline()
             pipe.srem(self.feed_job_stalled, id)
             pipe.lpush(self.feed_ids, id)
-            pipe.zadd(self.feed_published, time.time(), id)
+            pipe.zadd(self.feed_publish, time.time(), id)
             try:
                 results = pipe.execute()
+                self.thoonk._publish(self.feed_retried, (id,))
                 if not results[0]:
                     return # raise exception?
                 break

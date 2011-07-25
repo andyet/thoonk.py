@@ -95,7 +95,12 @@ class Thoonk(object):
                 'delete_notice': [],
                 'publish_notice': [],
                 'retract_notice': [],
-                'position_notice': []}
+                'position_notice': [],
+                'stalled_notice': [],
+                'retried_notice': [],
+                'finished_notice': [],
+                'claimed_notice': [],
+                'cancelled_notice': []}
 
         self.listen_ready = threading.Event()
         self.listening = listen
@@ -206,6 +211,20 @@ class Thoonk(object):
             self.handlers[name] = []
         self.handlers[name].append(handler)
 
+    def remove_handler(self, name, handler):
+        """
+        Unregister a function that was registered via register_handler
+
+        Arguments:
+            name    -- The name of the feed event.
+            handler -- The function for handling the event.
+        """
+        try:
+            self.handlers[name].remove(handler)
+        except (KeyError, ValueError):
+            pass
+        
+
     def create_feed(self, feed, config):
         """
         Create a new feed with a given configuration.
@@ -272,6 +291,12 @@ class Thoonk(object):
             jconfig = json.dumps(dconfig)
         self.redis.set(self.feed_config % feed, jconfig)
         self._publish(self.conf_feed, (feed, self._feed_config.instance))
+
+    def get_config(self, feed):
+        if not self.feed_exists(feed):
+            raise FeedDoesNotExist
+        config = self.redis.get(self.feed_config % feed)
+        return json.loads(config)
 
     def get_feeds(self):
         """
@@ -341,12 +366,36 @@ class Thoonk(object):
                 elif event['channel'].startswith('feed.position'):
                     self.position_notice(event['channel'].split(':', 1)[-1],
                                          event['data'])
+                elif event['channel'].startswith('feed.claimed'):
+                    self.claimed_notice(event['channel'].split(':', 1)[-1],
+                                        event['data'])
+                elif event['channel'].startswith('feed.finished'):
+                    id, data = event['data'].split(':', 1)[-1].split("\x00", 1)
+                    self.finished_notice(event['channel'].split(':', 1)[-1], id,
+                                        data)
+                elif event['channel'].startswith('feed.cancelled'):
+                    self.cancelled_notice(event['channel'].split(':', 1)[-1],
+                                        event['data'])
+                elif event['channel'].startswith('feed.stalled'):
+                    self.stalled_notice(event['channel'].split(':', 1)[-1],
+                                        event['data'])
+                elif event['channel'].startswith('feed.retried'):
+                    self.retried_notice(event['channel'].split(':', 1)[-1],
+                                        event['data'])
                 elif event['channel'] == self.new_feed:
                     #feed created event
                     name, instance = event['data'].split('\x00')
                     self.feeds.add(name)
-                    self.lredis.subscribe((self.feed_publish % name,
-                                           self.feed_retract % name))
+                    config = self.get_config(name)
+                    if config["type"] == "job":
+                        self.lredis.subscribe((self.feed_publish % name,
+                                               "feed.cancelled:%s" % name,
+                                               "feed.claimed:%s" % name,
+                                               "feed.finished:%s" % name,
+                                               "feed.stalled:%s" % name,))
+                    else:
+                        self.lredis.subscribe((self.feed_publish % name,
+                                               self.feed_retract % name))
                     self.create_notice(name)
                 elif event['channel'] == self.del_feed:
                     #feed destroyed event
@@ -424,3 +473,64 @@ class Thoonk(object):
         """
         for handler in self.handlers['position_notice']:
             handler(feed, id, rel_id)
+    
+    def stalled_notice(self, feed, id):
+        """
+        Generate a notice that a job has been stalled, and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed   -- The name of the feed.
+            id     -- The ID of the stalled item.
+        """
+        for handler in self.handlers['stalled_notice']:
+            handler(feed, id)
+
+    def retried_notice(self, feed, id):
+        """
+        Generate a notice that a job has been retried, and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed   -- The name of the feed.
+            id     -- The ID of the retried item.
+        """
+        for handler in self.handlers['retried_notice']:
+            handler(feed, id)
+
+    def cancelled_notice(self, feed, id):
+        """
+        Generate a notice that a job has been cancelled, and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed   -- The name of the feed.
+            id     -- The ID of the stalled item.
+        """
+        for handler in self.handlers['cancelled_notice']:
+            handler(feed, id)
+
+    def finished_notice(self, feed, id, result):
+        """
+        Generate a notice that a job has finished, and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed   -- The name of the feed.
+            id     -- The ID of the stalled item.
+        """
+        for handler in self.handlers['finished_notice']:
+            handler(feed, id, result)
+
+    def claimed_notice(self, feed, id):
+        """
+        Generate a notice that a job has been claimed, and
+        execute any relevant event handlers.
+
+        Arguments:
+            feed   -- The name of the feed.
+            id     -- The ID of the stalled item.
+        """
+        for handler in self.handlers['claimed_notice']:
+            handler(feed, id)
+        

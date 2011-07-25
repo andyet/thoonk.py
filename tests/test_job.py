@@ -32,7 +32,7 @@ class TestJob(unittest.TestCase):
         """JOB publish, retrieve, finish, get result"""
         #publisher
         testjob = self.ps.job("testjob")
-        id = testjob.put(9.0)
+        id = testjob.put('9.0')
 
         #worker
         testjobworker = self.ps.job("testjob")
@@ -49,7 +49,7 @@ class TestJob(unittest.TestCase):
         """Test cancelling a job"""
         j = self.ps.job("testjob")
         #publisher
-        id = j.put(9.0)
+        id = j.put('9.0')
         #worker claims
         id, query, cancelled = j.get()
         self.assertEqual(cancelled, 0)

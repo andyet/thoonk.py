@@ -124,7 +124,7 @@ class Feed(object):
         """
         with self.config_lock:
             if not self.config_valid:
-                conf = self.redis.get(self.feed_config)
+                conf = self.redis.get(self.feed_config) or "{}"
                 self._config = json.loads(conf)
                 self.config_valid = True
             return self._config
