@@ -304,6 +304,7 @@ class Thoonk(object):
 
         Returns: set
         """
+        self.feeds.update(self.redis.smembers('feeds'))
         return self.feeds
 
     def feed_exists(self, feed):
@@ -346,11 +347,10 @@ class Thoonk(object):
         self.lredis.subscribe((self.new_feed, self.del_feed, self.conf_feed))
 
         # get set of feeds
-        self.feeds.update(self.redis.smembers('feeds'))
-        if self.feeds:
-            # subscribe to exist feeds retract and publish
-            for feed in self.feeds:
-                self.lredis.subscribe(self[feed].get_channels())
+        feeds = self.get_feeds()
+        # subscribe to exist feeds retract and publish
+        for feed in self.feeds:
+            self.lredis.subscribe(self[feed].get_channels())
 
         self.listen_ready.set()
         for event in self.lredis.listen():
