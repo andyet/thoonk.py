@@ -92,7 +92,7 @@ class Job(Queue):
         """
         Queue.__init__(self, thoonk, feed, config=None)
 
-        #self.feed_publish = 'feed.publish:%s' % feed
+        self.feed_publishes = 'feed.publishes:%s' % feed
         self.feed_cancelled = 'feed.cancelled:%s' % feed
         self.feed_retried = 'feed.retried:%s' % feed
         self.feed_finished = 'feed.finished:%s' % feed
@@ -102,7 +102,7 @@ class Job(Queue):
         self.feed_job_running = 'feed.running:%s' % feed
 
     def get_channels(self):
-        return (self.feed_publish, self.feed_job_claimed, self.feed_job_stalled,
+        return (self.feed_publishes, self.feed_job_claimed, self.feed_job_stalled,
             self.feed_finished, self.feed_cancelled, self.feed_retried)
 
     def get_schemas(self):
@@ -110,7 +110,7 @@ class Job(Queue):
         schema = set((self.feed_job_claimed,
                       self.feed_job_stalled,
                       self.feed_job_running,
-                      self.feed_publish,
+                      self.feed_publishes,
                       self.feed_cancelled))
 
         for id in self.get_ids():
@@ -135,7 +135,7 @@ class Job(Queue):
                 pipe = self.redis.pipeline()
                 pipe.hdel(self.feed_items, id)
                 pipe.hdel(self.feed_cancelled, id)
-                pipe.zrem(self.feed_publish, id)
+                pipe.zrem(self.feed_publishes, id)
                 pipe.srem(self.feed_job_stalled, id)
                 pipe.zrem(self.feed_job_claimed, id)
                 pipe.lrem(self.feed_ids, 1, id)
@@ -172,13 +172,13 @@ class Job(Queue):
             pipe.lpush(self.feed_ids, id)
             pipe.incr(self.feed_publishes)
             pipe.hset(self.feed_items, id, item)
-            pipe.zadd(self.feed_publish, id, time.time())
+            pipe.zadd(self.feed_publishes, id, time.time())
 
         results = pipe.execute()
 
         if results[-1]:
             # If zadd was successful
-            self.thoonk._publish(self.feed_publish, (id, item))
+            self.thoonk._publish(self.feed_publishes, (id, item))
         else:
             self.thoonk._publish(self.feed_edit, (id, item))
 
@@ -305,7 +305,7 @@ class Job(Queue):
             pipe.zrem(self.feed_job_claimed, id)
             pipe.hdel(self.feed_cancelled, id)
             pipe.sadd(self.feed_job_stalled, id)
-            pipe.zrem(self.feed_publish, id)
+            pipe.zrem(self.feed_publishes, id)
             try:
                 pipe.execute()
                 self.thoonk._publish(self.feed_job_stalled, (id,))
@@ -329,7 +329,7 @@ class Job(Queue):
             pipe = self.redis.pipeline()
             pipe.srem(self.feed_job_stalled, id)
             pipe.lpush(self.feed_ids, id)
-            pipe.zadd(self.feed_publish, time.time(), id)
+            pipe.zadd(self.feed_publishes, time.time(), id)
             try:
                 results = pipe.execute()
                 self.thoonk._publish(self.feed_retried, (id,))

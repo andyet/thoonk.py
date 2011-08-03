@@ -388,7 +388,7 @@ class Thoonk(object):
                     self.feeds.add(name)
                     config = self.get_config(name)
                     if config["type"] == "job":
-                        self.lredis.subscribe((self.feed_publish % name,
+                        self.lredis.subscribe(("feed.publishes:%s" % name,
                                                "feed.cancelled:%s" % name,
                                                "feed.claimed:%s" % name,
                                                "feed.finished:%s" % name,
