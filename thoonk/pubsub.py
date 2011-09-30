@@ -125,15 +125,21 @@ class Thoonk(object):
             self.lthread.start()
             self.listen_ready.wait()
 
-    def _publish(self, schema, items):
+    def _publish(self, schema, items, pipe=None):
         """
         A shortcut method to publish items separated by \x00.
 
         Arguments:
             schema -- The key to publish the items to.
             items  -- A tuple or list of items to publish.
+            pipe   -- A redis pipeline to use to publish the item using.
+                      Note: it is up to the caller to execute the pipe after 
+                      publishing
         """
-        self.redis.publish(schema, "\x00".join(items))
+        if pipe:
+            pipe.publish(schema, "\x00".join(items))
+        else:
+            self.redis.publish(schema, "\x00".join(items))
 
     def __getitem__(self, feed):
         """
@@ -253,21 +259,21 @@ class Thoonk(object):
             feed -- The name of the feed.
         """
         feed_instance = self._feed_config[feed]
-        deleted = False
-        while not deleted:
-            self.redis.watch('feeds')
-            if not self.feed_exists(feed):
-                return FeedDoesNotExist
-            pipe = self.redis.pipeline()
-            pipe.srem("feeds", feed)
-            for key in feed_instance.get_schemas():
-                pipe.delete(key)
-                self._publish(self.del_feed, (feed, self._feed_config.instance))
-            try:
-                pipe.execute()
-                deleted = True
-            except redis.exceptions.WatchError:
-                deleted = False
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch('feeds')
+                    if not pipe.sismember('feeds', feed):
+                        raise FeedDoesNotExist
+                    pipe.multi()
+                    pipe.srem("feeds", feed)
+                    for key in feed_instance.get_schemas():
+                        pipe.delete(key)
+                        self._publish(self.del_feed, (feed, self._feed_config.instance))
+                    pipe.execute()
+                    break
+                except redis.exceptions.WatchError:
+                    pass
 
     def set_config(self, feed, config):
         """
@@ -314,6 +320,7 @@ class Thoonk(object):
         Arguments:
             feed -- The name of the feed.
         """
+        return self.redis.sismember('feeds', feed)
         if not self.listening:
             if not feed in self.feeds:
                 if self.redis.sismember('feeds', feed):
@@ -326,9 +333,7 @@ class Thoonk(object):
 
     def close(self):
         """Terminate the listening Redis connection."""
-        self.redis.connection.disconnect()
-        if self.listening:
-            self.lredis.connection.disconnect()
+        self.redis.connection_pool.disconnect()
 
     def listen(self):
         """
@@ -341,7 +346,7 @@ class Thoonk(object):
             - Item retractions.
         """
         # listener redis object
-        self.lredis = redis.Redis(host=self.host, port=self.port, db=self.db)
+        self.lredis = self.redis.pubsub()
 
         # subscribe to feed activities channel
         self.lredis.subscribe((self.new_feed, self.del_feed, self.conf_feed))
@@ -353,7 +358,12 @@ class Thoonk(object):
             self.lredis.subscribe(self[feed].get_channels())
 
         self.listen_ready.set()
-        for event in self.lredis.listen():
+        while True:
+            a = self.lredis.listen()
+            try:
+                event = a.next()
+            except:
+                break
             if event['type'] == 'message':
                 if event['channel'].startswith('feed.publish'):
                     #feed publish event
@@ -364,8 +374,9 @@ class Thoonk(object):
                     self.retract_notice(event['channel'].split(':', 1)[-1],
                                         event['data'])
                 elif event['channel'].startswith('feed.position'):
+                    id, rel_id = event['data'].split('\x00', 1)
                     self.position_notice(event['channel'].split(':', 1)[-1],
-                                         event['data'])
+                                         id, rel_id)
                 elif event['channel'].startswith('feed.claimed'):
                     self.claimed_notice(event['channel'].split(':', 1)[-1],
                                         event['data'])
@@ -391,6 +402,7 @@ class Thoonk(object):
                         self.lredis.subscribe(("feed.publishes:%s" % name,
                                                "feed.cancelled:%s" % name,
                                                "feed.claimed:%s" % name,
+                                               "feed.retried:%s" % name,
                                                "feed.finished:%s" % name,
                                                "feed.stalled:%s" % name,))
                     else:

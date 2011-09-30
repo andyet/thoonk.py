@@ -1,13 +1,12 @@
 import thoonk
+from thoonk.feeds import Feed
 import unittest
 from ConfigParser import ConfigParser
 
 
 class TestLeaf(unittest.TestCase):
 
-    def __init__(self, *args, **kwargs):
-        unittest.TestCase.__init__(self, *args, **kwargs)
-
+    def setUp(self, *args, **kwargs):
         conf = ConfigParser()
         conf.read('test.cfg')
         if conf.sections() == ['Test']:
@@ -22,6 +21,7 @@ class TestLeaf(unittest.TestCase):
     def test_05_basic_retract(self):
         """Test adding and retracting an item."""
         l = self.ps.feed("testfeed")
+        self.assertTrue(isinstance(l, Feed))
         l.publish('foo', id='1')
         r = l.get_ids()
         v = l.get_all()
@@ -46,6 +46,10 @@ class TestLeaf(unittest.TestCase):
     def test_20_basic_feed_items(self):
         """Test items match completely."""
         l = self.ps.feed("testfeed")
+        l.publish("hi", id='1')
+        l.publish("bye", id='2')
+        l.publish("thanks", id='3')
+        l.publish("you're welcome", id='4')
         r = l.get_ids()
         self.assertEqual(r, ['1', '2', '3', '4'], "Queue results did not match publish: %s" % r)
         c = {}
@@ -56,6 +60,10 @@ class TestLeaf(unittest.TestCase):
     def test_30_basic_feed_retract(self):
         """Testing item retract items match."""
         l = self.ps.feed("testfeed")
+        l.publish("hi", id='1')
+        l.publish("bye", id='2')
+        l.publish("thanks", id='3')
+        l.publish("you're welcome", id='4')
         l.retract('3')
         r = l.get_ids()
         self.assertEqual(r, ['1', '2','4'], "Queue results did not match publish: %s" % r)

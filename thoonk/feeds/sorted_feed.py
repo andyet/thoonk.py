@@ -3,9 +3,9 @@
     Released under the terms of the MIT License
 """
 
-from thoonk.exceptions import *
-from thoonk.feeds import *
-
+#from thoonk.exceptions import *
+from thoonk.feeds import Feed
+import redis.exceptions
 
 class SortedFeed(Feed):
 
@@ -87,8 +87,8 @@ class SortedFeed(Feed):
         pipe.lpush(self.feed_ids, id)
         pipe.incr(self.feed_publishes)
         pipe.hset(self.feed_items, id, item)
-        pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
-        pipe.publish(self.feed_position, '%s\x00%s' % (id, 'begin:'))
+        self.thoonk._publish(self.feed_publish, (str(id), item), pipe)
+        self.thoonk._publish(self.feed_position, (str(id), 'begin:'), pipe)
         pipe.execute()
         return id
 
@@ -105,27 +105,25 @@ class SortedFeed(Feed):
                       to rel_id.
         """
         id = self.redis.incr(self.feed_id_incr)
-        while True:
-            self.redis.watch(self.feed_items)
-            if not self.redis.hexists(self.feed_items, rel_id):
-                self.redis.unwatch()
-                return # raise exception?
-
-            pipe = self.redis.pipeline()
-            pipe.linsert(self.feed_ids, method, rel_id, id)
-            pipe.hset(self.feed_items, id, item)
-            pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
-            if method == 'BEFORE':
-                rel_id = ':%s' % rel_id
-            else:
-                rel_id = '%s:' % rel_id
-            pipe.publish(self.feed_position, '%s\x00%s' % (id, rel_id))
-
-            try:
-                pipe.execute()
-                break
-            except redis.exceptions.WatchError:
-                pass
+        if method == 'BEFORE':
+            pos_rel_id = ':%s' % rel_id
+        else:
+            pos_rel_id = '%s:' % rel_id
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(self.feed_items)
+                    if not pipe.hexists(self.feed_items, rel_id):
+                        return # raise exception?
+                    pipe.multi()
+                    pipe.linsert(self.feed_ids, method, rel_id, id)
+                    pipe.hset(self.feed_items, id, item)
+                    self.thoonk._publish(self.feed_publish, (str(id), item), pipe)
+                    self.thoonk._publish(self.feed_position, (str(id), pos_rel_id), pipe)
+                    pipe.execute()
+                    break
+                except redis.exceptions.WatchError:
+                    pass
         return id
 
     def publish(self, item):
@@ -142,8 +140,8 @@ class SortedFeed(Feed):
         pipe.rpush(self.feed_ids, id)
         pipe.incr(self.feed_publishes)
         pipe.hset(self.feed_items, id, item)
-        pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
-        pipe.publish(self.feed_position, '%s\x00%s' % (id, ':end'))
+        self.thoonk._publish(self.feed_publish, (str(id), item), pipe)
+        self.thoonk._publish(self.feed_position, (str(id), ':end'), pipe)
         pipe.execute()
         return id
 
@@ -155,22 +153,20 @@ class SortedFeed(Feed):
             id   -- The ID value of the item to edit.
             item -- The new contents of the item.
         """
-        while True:
-            self.redis.watch(self.feed_items)
-            if not self.redis.hexists(self.feed_items, id):
-                self.redis.unwatch()
-                return # raise exception?
-
-            pipe = self.redis.pipeline()
-            pipe.hset(self.feed_items, id, item)
-            pipe.incr(self.feed_publishes)
-            pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
-
-            try:
-                pipe.execute()
-                break
-            except redis.exceptions.WatchError:
-                pass
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(self.feed_items)
+                    if not pipe.hexists(self.feed_items, id):
+                        return # raise exception?
+                    pipe.multi()
+                    pipe.hset(self.feed_items, id, item)
+                    pipe.incr(self.feed_publishes)
+                    pipe.publish(self.feed_publish, '%s\x00%s' % (id, item))
+                    pipe.execute()
+                    break
+                except redis.exceptions.WatchError:
+                    pass
 
     def publish_before(self, before_id, item):
         """
@@ -216,33 +212,31 @@ class SortedFeed(Feed):
         else:
             raise ValueError('Relative ID formatted incorrectly')
 
-        while True:
-            self.redis.watch(self.feed_items)
-            if not self.redis.hexists(self.feed_items, id):
-                self.redis.unwatch()
-                break
-            if rel_id not in ['begin', 'end'] and \
-               not self.redis.hexists(self.feed_items, rel_id):
-                self.redis.unwatch()
-                break
-
-            pipe = self.redis.pipeline()
-            pipe.lrem(self.feed_ids, id, 1)
-            if rel_id == 'begin':
-                pipe.lpush(self.feed_ids, id)
-            elif rel_id == 'end':
-                pipe.rpush(self.feed_ids, id)
-            else:
-                pipe.linsert(self.feed_ids, dir, rel_id, id)
-
-            pipe.publish(self.feed_position,
-                         '%s\x00%s' % (id, rel_position))
-
-            try:
-                pipe.execute()
-                break
-            except redis.exceptions.WatchError:
-                pass
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(self.feed_items)
+                    if not pipe.hexists(self.feed_items, id):
+                        break
+                    if rel_id not in ['begin', 'end'] and \
+                       not pipe.hexists(self.feed_items, rel_id):
+                        break
+                    pipe.multi()
+                    pipe.lrem(self.feed_ids, id, 1)
+                    if rel_id == 'begin':
+                        pipe.lpush(self.feed_ids, id)
+                    elif rel_id == 'end':
+                        pipe.rpush(self.feed_ids, id)
+                    else:
+                        pipe.linsert(self.feed_ids, dir, rel_id, id)
+        
+                    pipe.publish(self.feed_position,
+                                 '%s\x00%s' % (id, rel_position))
+        
+                    pipe.execute()
+                    break
+                except redis.exceptions.WatchError:
+                    pass
 
     def move_before(self, rel_id, id):
         """
@@ -289,21 +283,19 @@ class SortedFeed(Feed):
         Arguments:
             id -- The ID value of the item to remove.
         """
-        while True:
-            self.redis.watch(self.feed_items)
-            if self.redis.hexists(self.feed_items, id):
-                pipe = self.redis.pipeline()
-                pipe.lrem(self.feed_ids, id, 1)
-                pipe.hdel(self.feed_items, id)
-                pipe.publish(self.feed_retract, id)
+        with self.redis.pipeline() as pipe:
+            while True:
                 try:
-                    pipe.execute()
+                    pipe.watch(self.feed_items)
+                    if pipe.hexists(self.feed_items, id):
+                        pipe.multi()
+                        pipe.lrem(self.feed_ids, id, 1)
+                        pipe.hdel(self.feed_items, id)
+                        pipe.publish(self.feed_retract, id)
+                        pipe.execute()
                     break
                 except redis.exceptions.WatchError:
                     pass
-            else:
-                self.redis.unwatch()
-                return
 
     def get_ids(self):
         """Return the set of IDs used by items in the feed."""

@@ -1,13 +1,12 @@
 import thoonk
+from thoonk.feeds import SortedFeed
 import unittest
 from ConfigParser import ConfigParser
 
 
 class TestLeaf(unittest.TestCase):
-
-    def __init__(self, *args, **kwargs):
-        unittest.TestCase.__init__(self, *args, **kwargs)
-
+    
+    def setUp(self):
         conf = ConfigParser()
         conf.read('test.cfg')
         if conf.sections() == ['Test']:
@@ -18,10 +17,11 @@ class TestLeaf(unittest.TestCase):
         else:
             print 'No test configuration found in test.cfg'
             exit()
-
+    
     def test_10_basic_sorted_feed(self):
         """Test basic sorted feed publish and retrieve."""
         l = self.ps.sorted_feed("testfeed")
+        self.assertEqual(l.__class__, SortedFeed)
         l.publish("hi")
         l.publish("bye")
         l.publish("thanks")
@@ -38,40 +38,43 @@ class TestLeaf(unittest.TestCase):
     def test_20_sorted_feed_before(self):
         """Test addding an item before another item"""
         l = self.ps.sorted_feed("testfeed")
-        l.publish_before('3', 'foo')
+        l.publish("hi")
+        l.publish("bye")
+        l.publish_before('2', 'foo')
         r = l.get_ids()
-        self.assertEqual(r, ['1', '2', '5', '3', '4'], "Sorted feed results did not match: %s." % r)
+        self.assertEqual(r, ['1', '3', '2'], "Sorted feed results did not match: %s." % r)
 
     def test_30_sorted_feed_after(self):
         """Test adding an item after another item"""
         l = self.ps.sorted_feed("testfeed")
-        l.publish_after('3', 'foo')
+        l.publish("hi")
+        l.publish("bye")
+        l.publish_after('1', 'foo')
         r = l.get_ids()
-        self.assertEqual(r, ['1', '2', '5', '3', '6', '4'], "Sorted feed results did not match: %s." % r)
+        self.assertEqual(r, ['1', '3', '2'], "Sorted feed results did not match: %s." % r)
 
     def test_40_sorted_feed_prepend(self):
         """Test addding an item to the front of the sorted feed"""
         l = self.ps.sorted_feed("testfeed")
+        l.publish("hi")
+        l.publish("bye")
         l.prepend('bar')
         r = l.get_ids()
-        self.assertEqual(r, ['7', '1', '2', '5', '3', '6', '4'],
+        self.assertEqual(r, ['3', '1', '2'],
                 "Sorted feed results don't match: %s" % r)
 
     def test_50_sorted_feed_edit(self):
         """Test editing an item in a sorted feed"""
         l = self.ps.sorted_feed("testfeed")
-        l.edit('6', 'bar')
+        l.publish("hi")
+        l.publish("bye")
+        l.edit('1', 'bar')
         r = l.get_ids()
-        v = l.get_item('6')
+        v = l.get_item('1')
         vs = l.get_items()
-        items = {'1': 'hi',
-                 '2': 'bye',
-                 '3': 'thanks',
-                 '4': "you're welcome",
-                 '5': 'foo',
-                 '6': 'bar',
-                 '7': 'bar'}
-        self.assertEqual(r, ['7', '1', '2', '5', '3', '6', '4'],
+        items = {'1': 'bar',
+                 '2': 'bye'}
+        self.assertEqual(r, ['1', '2'],
                 "Sorted feed results don't match: %s" % r)
         self.assertEqual(v, 'bar', "Items don't match: %s" % v)
         self.assertEqual(vs, items, "Sorted feed items don't match: %s" % vs)
@@ -79,33 +82,62 @@ class TestLeaf(unittest.TestCase):
     def test_60_sorted_feed_retract(self):
         """Test retracting an item from a sorted feed"""
         l = self.ps.sorted_feed("testfeed")
+        l.publish("hi")
+        l.publish("bye")
+        l.publish("thanks")
+        l.publish("you're welcome")
         l.retract('3')
         r = l.get_ids()
-        self.assertEqual(r, ['7', '1', '2', '5', '6', '4'],
+        self.assertEqual(r, ['1', '2', '4'],
                 "Sorted feed results don't match: %s" % r)
 
-    def test_70_sorted_feed_move(self):
+    def test_70_sorted_feed_move_first(self):
         """Test moving items around in the feed."""
         l = self.ps.sorted_feed('testfeed')
-        l.move_first('6')
+        l.publish("hi")
+        l.publish("bye")
+        l.publish("thanks")
+        l.publish("you're welcome")
+        l.move_first('4')
         r = l.get_ids()
-        self.assertEqual(r, ['6', '7', '1', '2', '5', '4'],
+        self.assertEqual(r, ['4', '1', '2', '3'],
                 "Sorted feed results don't match: %s" % r)
 
-        l.move_last('7')
+    def test_71_sorted_feed_move_last(self):
+        """Test moving items around in the feed."""
+        l = self.ps.sorted_feed('testfeed')
+        l.publish("hi")
+        l.publish("bye")
+        l.publish("thanks")
+        l.publish("you're welcome")
+        l.move_last('2')
         r = l.get_ids()
-        self.assertEqual(r, ['6', '1', '2', '5', '4', '7'],
+        self.assertEqual(r, ['1', '3', '4', '2'],
                 "Sorted feed results don't match: %s" % r)
 
 
-        l.move_before('2', '5')
+    def test_72_sorted_feed_move_before(self):
+        """Test moving items around in the feed."""
+        l = self.ps.sorted_feed('testfeed')
+        l.publish("hi")
+        l.publish("bye")
+        l.publish("thanks")
+        l.publish("you're welcome")
+        l.move_before('1', '2')
         r = l.get_ids()
-        self.assertEqual(r, ['6', '1', '5', '2', '4', '7'],
+        self.assertEqual(r, ['2', '1', '3', '4'],
                 "Sorted feed results don't match: %s" % r)
 
+    def test_73_sorted_feed_move_after(self):
+        """Test moving items around in the feed."""
+        l = self.ps.sorted_feed('testfeed')
+        l.publish("hi")
+        l.publish("bye")
+        l.publish("thanks")
+        l.publish("you're welcome")
         l.move_after('1', '4')
         r = l.get_ids()
-        self.assertEqual(r, ['6', '1', '4', '5', '2', '7'],
+        self.assertEqual(r, ['1', '4', '2', '3'],
                 "Sorted feed results don't match: %s" % r)
 
 

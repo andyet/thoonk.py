@@ -6,9 +6,7 @@ from ConfigParser import ConfigParser
 
 class TestJob(unittest.TestCase):
 
-    def __init__(self, *args, **kwargs):
-        unittest.TestCase.__init__(self, *args, **kwargs)
-
+    def setUp(self, *args, **kwargs):
         conf = ConfigParser()
         conf.read('test.cfg')
         if conf.sections() == ['Test']:
@@ -19,11 +17,6 @@ class TestJob(unittest.TestCase):
         else:
             print 'No test configuration found in test.cfg'
             exit()
-
-
-    def setUp(self):
-        self.ps = thoonk.Pubsub(db=10, listen=True)
-        self.ps.redis.flushdb()
 
     def tearDown(self):
         self.ps.close()
@@ -38,7 +31,7 @@ class TestJob(unittest.TestCase):
         testjobworker = self.ps.job("testjob")
         id_worker, query_worker, cancelled = testjobworker.get(timeout=3)
         result_worker = math.sqrt(float(query_worker))
-        testjobworker.finish(id_worker, result_worker, True)
+        testjobworker.finish(id_worker, str(result_worker), True)
 
         #publisher gets result
         query_publisher, result_publisher = testjob.get_result(id, 1)

@@ -1,13 +1,12 @@
 import thoonk
+from thoonk.feeds import Queue
 import unittest
 from ConfigParser import ConfigParser
 
 
 class TestQueue(unittest.TestCase):
 
-    def __init__(self, *args, **kwargs):
-        unittest.TestCase.__init__(self, *args, **kwargs)
-
+    def setUp(self):
         conf = ConfigParser()
         conf.read('test.cfg')
         if conf.sections() == ['Test']:
@@ -22,6 +21,7 @@ class TestQueue(unittest.TestCase):
     def test_basic_queue(self):
         """Test basic QUEUE publish and retrieve."""
         q = self.ps.queue("testqueue")
+        self.assertEqual(q.__class__, Queue)
         q.put("10")
         q.put("20")
         q.put("30")

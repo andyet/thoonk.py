@@ -1,25 +1,26 @@
 import thoonk
+from thoonk.feeds import Feed, Job
 import unittest
 import time
+import redis
 from ConfigParser import ConfigParser
 
 class TestNotice(unittest.TestCase):
 
-    def __init__(self, *args, **kwargs):
-        unittest.TestCase.__init__(self, *args, **kwargs)
-
+    def setUp(self):
         conf = ConfigParser()
         conf.read('test.cfg')
         if conf.sections() == ['Test']:
+            redis.Redis(host=conf.get('Test', 'host'),
+                        port=conf.getint('Test', 'port'),
+                        db=conf.getint('Test', 'db')).flushdb()
             self.ps = thoonk.Thoonk(host=conf.get('Test', 'host'),
                                     port=conf.getint('Test', 'port'),
                                     db=conf.getint('Test', 'db'),
                                     listen=True)
-            self.ps.redis.flushdb()
         else:
             print 'No test configuration found in test.cfg'
             exit()
-
 
     def tearDown(self):
         self.ps.close()
@@ -36,9 +37,9 @@ class TestNotice(unittest.TestCase):
             notice_received[0] = True
         
         self.ps.register_handler('publish_notice', received_handler)
-        
         j = self.ps.feed("testfeed")
-        
+        time.sleep(1)
+        self.assertEqual(j.__class__, Feed)
         self.assertFalse(notice_received[0])
         
         #publisher
@@ -48,11 +49,11 @@ class TestNotice(unittest.TestCase):
         i = 0
         while not notice_received[0] and i < 3:
             i += 1
-            time.sleep(1)
+            time.sleep(3)
 
-        self.assertEqual(ids[0], ids[1])
-        
         self.assertTrue(notice_received[0], "Notice not received")
+        
+        self.assertEqual(ids[1], ids[0])
         
         self.ps.remove_handler('publish_notice', received_handler)
 
@@ -104,6 +105,8 @@ class TestNotice(unittest.TestCase):
         self.ps.register_handler('finished_notice', finished_handler)
         
         j = self.ps.job("testjob")
+        self.assertEqual(j.__class__, Job)
+        time.sleep(1) # wait for newfeed notice to propagate to listener
         
         self.assertFalse(notices_received[0])
         

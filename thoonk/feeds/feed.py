@@ -13,7 +13,7 @@ except ImportError:
     import Queue as queue
 
 from thoonk.exceptions import *
-
+import redis.exceptions
 
 class Feed(object):
 
@@ -199,26 +199,28 @@ class Feed(object):
         publish_id = id
         if publish_id is None:
             publish_id = uuid.uuid4().hex
-        while True:
-            self.redis.watch(self.feed_ids)
-
-            max = int(self.config.get('max_length', 0))
-            pipe = self.redis.pipeline()
-            if max > 0:
-                delete_ids = self.redis.zrange(self.feed_ids, 0, -max)
-                for id in delete_ids:
-                    if id != publish_id:
-                        pipe.zrem(self.feed_ids, id)
-                        pipe.hdel(self.feed_items, id)
-                        pipe.publish(self.feed_retract, id)
-            pipe.zadd(self.feed_ids, publish_id, time.time())
-            pipe.incr(self.feed_publishes)
-            pipe.hset(self.feed_items, publish_id, item)
-            try:
-                results = pipe.execute()
-                break
-            except redis.exceptions.WatchError:
-                pass
+        with self.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(self.feed_ids)
+                    max = int(self.config.get('max_length', 0))
+                    if max > 0:
+                        delete_ids = pipe.zrange(self.feed_ids, 0, -max)
+                        pipe.multi()
+                        for id in delete_ids:
+                            if id != publish_id:
+                                pipe.zrem(self.feed_ids, id)
+                                pipe.hdel(self.feed_items, id)
+                                self.thoonk._publish(self.feed_retract, (id,), pipe)
+                    else:
+                        pipe.multi()
+                    pipe.zadd(self.feed_ids, **{publish_id: time.time()})
+                    pipe.incr(self.feed_publishes)
+                    pipe.hset(self.feed_items, publish_id, item)
+                    results = pipe.execute()
+                    break
+                except redis.exceptions.WatchError:
+                    pass
 
         if results[-3]:
             # If zadd was successful
@@ -235,18 +237,16 @@ class Feed(object):
         Arguments:
             id -- The ID value of the item to remove.
         """
-        while True:
-            self.redis.watch(self.feed_ids)
-            if self.redis.zrank(self.feed_ids, id) is not None:
-                pipe = self.redis.pipeline()
-                pipe.zrem(self.feed_ids, id)
-                pipe.hdel(self.feed_items, id)
-                pipe.publish(self.feed_retract, id)
+        with self.redis.pipeline() as pipe:
+            while True:
                 try:
-                    pipe.execute()
+                    pipe.watch(self.feed_ids)
+                    if pipe.zrank(self.feed_ids, id) is not None:
+                        pipe.multi()
+                        pipe.zrem(self.feed_ids, id)
+                        pipe.hdel(self.feed_items, id)
+                        self.thoonk._publish(self.feed_retract, (id,), pipe)
+                        pipe.execute()
                     return
                 except redis.exceptions.WatchError:
                     pass
-            else:
-                self.redis.unwatch()
-                break
