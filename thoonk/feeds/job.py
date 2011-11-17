@@ -129,23 +129,18 @@ class Job(Queue):
         Arguments:
             id -- The ID of the job to remove.
         """
-        with self.redis.pipeline() as pipe:
-            while True:
-                try:
-                    pipe.watch(self.feed_items)
-                    if pipe.hexists(self.feed_items, id):
-                        pipe.multi()
-                        pipe.hdel(self.feed_items, id)
-                        pipe.hdel(self.feed_cancelled, id)
-                        pipe.zrem(self.feed_publishes, id)
-                        pipe.srem(self.feed_job_stalled, id)
-                        pipe.zrem(self.feed_job_claimed, id)
-                        pipe.lrem(self.feed_ids, 1, id)
-                        pipe.delete(self.feed_job_finished % id)
-                        pipe.execute()
-                    return
-                except redis.exceptions.WatchError:
-                    pass
+        def _retract(pipe):
+            if pipe.hexists(self.feed_items, id):
+                pipe.multi()
+                pipe.hdel(self.feed_items, id)
+                pipe.hdel(self.feed_cancelled, id)
+                pipe.zrem(self.feed_publishes, id)
+                pipe.srem(self.feed_job_stalled, id)
+                pipe.zrem(self.feed_job_claimed, id)
+                pipe.lrem(self.feed_ids, 1, id)
+                pipe.delete(self.feed_job_finished % id)
+        
+        self.redis.transaction(_retract, self.feed_items)
 
     def put(self, item, priority=False):
         """
@@ -222,27 +217,22 @@ class Job(Queue):
             timeout -- Time in seconds to keep the result data. The default
                        is to store data indefinitely until retrieved.
         """
-        with self.redis.pipeline() as pipe:
-            while True:
-                try:
-                    pipe.watch(self.feed_job_claimed)
-                    if pipe.zrank(self.feed_job_claimed, id) is None:
-                        return # raise exception?
-                    #query = pipe.hget(self.feed_items, id)
-                    pipe.multi()
-                    pipe.zrem(self.feed_job_claimed, id)
-                    pipe.hdel(self.feed_cancelled, id)
-                    if result:
-                        pipe.lpush(self.feed_job_finished % id, item)
-                        if timeout is not None:
-                            pipe.expire(self.feed_job_finished % id, timeout)
-                    pipe.hdel(self.feed_items, id)
-                    self.thoonk._publish(self.feed_finished, 
-                        (id, item if result else ""), pipe)
-                    pipe.execute()
-                    break
-                except redis.exceptions.WatchError:
-                    pass
+        def _finish(pipe):
+            if pipe.zrank(self.feed_job_claimed, id) is None:
+                return # raise exception?
+            #query = pipe.hget(self.feed_items, id)
+            pipe.multi()
+            pipe.zrem(self.feed_job_claimed, id)
+            pipe.hdel(self.feed_cancelled, id)
+            if result:
+                pipe.lpush(self.feed_job_finished % id, item)
+                if timeout is not None:
+                    pipe.expire(self.feed_job_finished % id, timeout)
+            pipe.hdel(self.feed_items, id)
+            self.thoonk._publish(self.feed_finished, 
+                (id, item if result else ""), pipe)
+        
+        self.redis.transaction(_finish, self.feed_job_claimed)
 
     def get_result(self, id, timeout=0):
         """
@@ -264,21 +254,16 @@ class Job(Queue):
         Arguments:
             id -- The ID of the job to cancel.
         """
-        with self.redis.pipeline() as pipe:
-            while True:
-                try:
-                    pipe.watch(self.feed_job_claimed)
-                    if self.redis.zrank(self.feed_job_claimed, id) is None:
-                        return # raise exception?
-                    pipe.multi()
-                    pipe.hincrby(self.feed_cancelled, id, 1)
-                    pipe.lpush(self.feed_ids, id)
-                    pipe.zrem(self.feed_job_claimed, id)
-                    self.thoonk._publish(self.feed_cancelled, (id,), pipe)
-                    pipe.execute()
-                    break
-                except redis.exceptions.WatchError:
-                    pass
+        def _cancel(pipe):
+            if self.redis.zrank(self.feed_job_claimed, id) is None:
+                return # raise exception?
+            pipe.multi()
+            pipe.hincrby(self.feed_cancelled, id, 1)
+            pipe.lpush(self.feed_ids, id)
+            pipe.zrem(self.feed_job_claimed, id)
+            self.thoonk._publish(self.feed_cancelled, (id,), pipe)
+        
+        self.redis.transaction(_cancel, self.feed_job_claimed)
 
     def stall(self, id):
         """
@@ -289,22 +274,17 @@ class Job(Queue):
         Arguments:
             id -- The ID of the job to pause.
         """
-        with self.redis.pipeline() as pipe:
-            while True:
-                try:
-                    pipe.watch(self.feed_job_claimed)
-                    if pipe.zrank(self.feed_job_claimed, id) is None:
-                        return # raise exception?
-                    pipe.multi()
-                    pipe.zrem(self.feed_job_claimed, id)
-                    pipe.hdel(self.feed_cancelled, id)
-                    pipe.sadd(self.feed_job_stalled, id)
-                    pipe.zrem(self.feed_publishes, id)
-                    self.thoonk._publish(self.feed_job_stalled, (id,), pipe)
-                    pipe.execute()
-                    break
-                except redis.exceptions.WatchError:
-                    pass
+        def _stall(pipe):
+            if pipe.zrank(self.feed_job_claimed, id) is None:
+                return # raise exception?
+            pipe.multi()
+            pipe.zrem(self.feed_job_claimed, id)
+            pipe.hdel(self.feed_cancelled, id)
+            pipe.sadd(self.feed_job_stalled, id)
+            pipe.zrem(self.feed_publishes, id)
+            self.thoonk._publish(self.feed_job_stalled, (id,), pipe)
+        
+        self.redis.transaction(_stall, self.feed_job_claimed)
 
     def retry(self, id):
         """
@@ -313,23 +293,18 @@ class Job(Queue):
         Arguments:
             id -- The ID of the job to resume.
         """
-        with self.redis.pipeline() as pipe:
-            while True:
-                try:
-                    pipe.watch(self.feed_job_stalled)
-                    if pipe.sismember(self.feed_job_stalled, id) is None:
-                        break # raise exception?
-                    pipe.multi()
-                    pipe.srem(self.feed_job_stalled, id)
-                    pipe.lpush(self.feed_ids, id)
-                    pipe.zadd(self.feed_publishes, **{id: time.time()})
-                    self.thoonk._publish(self.feed_retried, (id,), pipe)
-                    results = pipe.execute()
-                    if not results[0]:
-                        return # raise exception?
-                    break
-                except redis.exceptions.WatchError:
-                    pass
+        def _retry(pipe):
+            if pipe.sismember(self.feed_job_stalled, id) is None:
+                return # raise exception?
+            pipe.multi()
+            pipe.srem(self.feed_job_stalled, id)
+            pipe.lpush(self.feed_ids, id)
+            pipe.zadd(self.feed_publishes, **{id: time.time()})
+            self.thoonk._publish(self.feed_retried, (id,), pipe)
+        
+        results = self.redis.transaction(_retry, self.feed_job_stalled)
+        if not results[0]:
+            return # raise exception?
 
     def maintenance(self):
         """

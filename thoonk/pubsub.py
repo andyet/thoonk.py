@@ -84,7 +84,7 @@ class Thoonk(object):
         self.host = host
         self.port = port
         self.db = db
-        self.redis = redis.Redis(host=self.host, port=self.port, db=self.db)
+        self.redis = redis.StrictRedis(host=self.host, port=self.port, db=self.db)
         self.lredis = None
 
         self.feedtypes = {}
@@ -259,21 +259,17 @@ class Thoonk(object):
             feed -- The name of the feed.
         """
         feed_instance = self._feed_config[feed]
-        with self.redis.pipeline() as pipe:
-            while True:
-                try:
-                    pipe.watch('feeds')
-                    if not pipe.sismember('feeds', feed):
-                        raise FeedDoesNotExist
-                    pipe.multi()
-                    pipe.srem("feeds", feed)
-                    for key in feed_instance.get_schemas():
-                        pipe.delete(key)
-                        self._publish(self.del_feed, (feed, self._feed_config.instance))
-                    pipe.execute()
-                    break
-                except redis.exceptions.WatchError:
-                    pass
+        
+        def _delete_feed(pipe):
+            if not pipe.sismember('feeds', feed):
+                raise FeedDoesNotExist
+            pipe.multi()
+            pipe.srem("feeds", feed)
+            for key in feed_instance.get_schemas():
+                pipe.delete(key)
+                self._publish(self.del_feed, (feed, self._feed_config.instance))
+
+        self.redis.transaction(_delete_feed, 'feeds')
 
     def set_config(self, feed, config):
         """
