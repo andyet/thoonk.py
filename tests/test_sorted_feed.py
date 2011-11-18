@@ -20,7 +20,7 @@ class TestLeaf(unittest.TestCase):
     
     def test_10_basic_sorted_feed(self):
         """Test basic sorted feed publish and retrieve."""
-        l = self.ps.sorted_feed("testfeed")
+        l = self.ps.sorted_feed("sortedfeed")
         self.assertEqual(l.__class__, SortedFeed)
         l.publish("hi")
         l.publish("bye")
@@ -37,7 +37,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_20_sorted_feed_before(self):
         """Test addding an item before another item"""
-        l = self.ps.sorted_feed("testfeed")
+        l = self.ps.sorted_feed("sortedfeed")
         l.publish("hi")
         l.publish("bye")
         l.publish_before('2', 'foo')
@@ -46,7 +46,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_30_sorted_feed_after(self):
         """Test adding an item after another item"""
-        l = self.ps.sorted_feed("testfeed")
+        l = self.ps.sorted_feed("sortedfeed")
         l.publish("hi")
         l.publish("bye")
         l.publish_after('1', 'foo')
@@ -55,7 +55,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_40_sorted_feed_prepend(self):
         """Test addding an item to the front of the sorted feed"""
-        l = self.ps.sorted_feed("testfeed")
+        l = self.ps.sorted_feed("sortedfeed")
         l.publish("hi")
         l.publish("bye")
         l.prepend('bar')
@@ -65,7 +65,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_50_sorted_feed_edit(self):
         """Test editing an item in a sorted feed"""
-        l = self.ps.sorted_feed("testfeed")
+        l = self.ps.sorted_feed("sortedfeed")
         l.publish("hi")
         l.publish("bye")
         l.edit('1', 'bar')
@@ -81,7 +81,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_60_sorted_feed_retract(self):
         """Test retracting an item from a sorted feed"""
-        l = self.ps.sorted_feed("testfeed")
+        l = self.ps.sorted_feed("sortedfeed")
         l.publish("hi")
         l.publish("bye")
         l.publish("thanks")
@@ -93,7 +93,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_70_sorted_feed_move_first(self):
         """Test moving items around in the feed."""
-        l = self.ps.sorted_feed('testfeed')
+        l = self.ps.sorted_feed('sortedfeed')
         l.publish("hi")
         l.publish("bye")
         l.publish("thanks")
@@ -105,7 +105,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_71_sorted_feed_move_last(self):
         """Test moving items around in the feed."""
-        l = self.ps.sorted_feed('testfeed')
+        l = self.ps.sorted_feed('sortedfeed')
         l.publish("hi")
         l.publish("bye")
         l.publish("thanks")
@@ -118,7 +118,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_72_sorted_feed_move_before(self):
         """Test moving items around in the feed."""
-        l = self.ps.sorted_feed('testfeed')
+        l = self.ps.sorted_feed('sortedfeed')
         l.publish("hi")
         l.publish("bye")
         l.publish("thanks")
@@ -130,7 +130,7 @@ class TestLeaf(unittest.TestCase):
 
     def test_73_sorted_feed_move_after(self):
         """Test moving items around in the feed."""
-        l = self.ps.sorted_feed('testfeed')
+        l = self.ps.sorted_feed('sortedfeed')
         l.publish("hi")
         l.publish("bye")
         l.publish("thanks")

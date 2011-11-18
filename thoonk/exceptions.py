@@ -7,12 +7,11 @@
 class FeedExists(Exception):
     pass
 
-class NotAllowed(Exception):
-    pass
-
 class FeedDoesNotExist(Exception):
     pass
 
-class ItemDoesNotExist(Exception):
+class Empty(Exception):
     pass
 
+class NotListening(Exception):
+    pass

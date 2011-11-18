@@ -3,8 +3,6 @@
     Released under the terms of the MIT License
 """
 
-import json
-import threading
 import time
 import uuid
 try:
@@ -28,7 +26,6 @@ class Feed(object):
         thoonk -- The main Thoonk object.
         redis  -- A Redis connection instance from the Thoonk object.
         feed   -- The name of the feed.
-        config -- A dictionary of configuration values.
 
     Redis Keys Used:
         feed.ids:[feed]       -- A sorted set of item IDs.
@@ -54,7 +51,7 @@ class Feed(object):
         retract  -- Remove an item from the feed.
     """
 
-    def __init__(self, thoonk, feed, config=None):
+    def __init__(self, thoonk, feed):
         """
         Create a new Feed object for a given Thoonk feed.
 
@@ -67,12 +64,9 @@ class Feed(object):
             feed   -- The name of the feed.
             config -- Optional dictionary of configuration values.
         """
-        self.config_lock = threading.Lock()
-        self.config_valid = False
         self.thoonk = thoonk
         self.redis = thoonk.redis
         self.feed = feed
-        self._config = None
 
         self.feed_ids = 'feed.ids:%s' % feed
         self.feed_items = 'feed.items:%s' % feed
@@ -114,39 +108,6 @@ class Feed(object):
         """
         pass
 
-    @property
-    def config(self):
-        """
-        Return the feed's configuration.
-
-        If the cached version is marked as invalid, then a new copy of
-        the config will be retrieved from Redis.
-        """
-        with self.config_lock:
-            if not self.config_valid:
-                conf = self.redis.get(self.feed_config) or "{}"
-                self._config = json.loads(conf)
-                self.config_valid = True
-            return self._config
-
-    @config.setter
-    def config(self, config):
-        """
-        Set a new configuration for the feed.
-
-        Arguments:
-            config -- A dictionary of configuration values.
-        """
-        with self.config_lock:
-            self.thoonk.set_config(self.feed, config)
-            self.config_valid = False
-
-    @config.deleter
-    def config(self):
-        """Mark the current configuration cache as invalid."""
-        with self.config_lock:
-            self.config_valid = False
-
     def delete_feed(self):
         """Delete the feed and its contents."""
         self.thoonk.delete_feed(self.feed)
@@ -156,7 +117,7 @@ class Feed(object):
         return set((self.feed_ids, self.feed_items, self.feed_publish,
                     self.feed_publishes, self.feed_retract, self.feed_config,
                     self.feed_edit))
-
+    
     # Thoonk Standard API
     # =================================================================
 
@@ -200,9 +161,8 @@ class Feed(object):
         if publish_id is None:
             publish_id = uuid.uuid4().hex
         
-        max = int(self.config.get('max_length', 0))
-        
         def _publish(pipe):
+            max = int(pipe.hget(self.feed_config, "max_length") or 0)
             if max > 0:
                 delete_ids = pipe.zrange(self.feed_ids, 0, -max)
                 pipe.multi()

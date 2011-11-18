@@ -5,13 +5,8 @@
 
 import uuid
 
-from thoonk.exceptions import *
+from thoonk.exceptions import Empty
 from thoonk.feeds import Feed
-
-
-class Empty(Exception):
-    pass
-
 
 class Queue(Feed):
 

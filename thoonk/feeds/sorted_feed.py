@@ -32,7 +32,7 @@ class SortedFeed(Feed):
         publish_before -- Add an item immediately after an existing item.
     """
 
-    def __init__(self, thoonk, feed, config=None):
+    def __init__(self, thoonk, feed):
         """
         Create a new SortedFeed object for a given Thoonk feed.
 
@@ -46,7 +46,7 @@ class SortedFeed(Feed):
             config -- Optional dictionary of configuration values.
 
         """
-        Feed.__init__(self, thoonk, feed, config)
+        Feed.__init__(self, thoonk, feed)
 
         self.feed_id_incr = 'feed.idincr:%s' % feed
         self.feed_position = 'feed.position:%s' % feed

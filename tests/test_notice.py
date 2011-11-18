@@ -4,6 +4,7 @@ import unittest
 import time
 import redis
 from ConfigParser import ConfigParser
+import threading
 
 class TestNotice(unittest.TestCase):
 
@@ -26,38 +27,82 @@ class TestNotice(unittest.TestCase):
         self.ps.close()
 
     "claimed, cancelled, stalled, finished"
-
-    def test_05_publish_notice(self):
-        notice_received = [False]
+    def test_01_feed_notices(self):
+        """Test for create, publish, edit, retract and delete notices from feeds"""
+        
+        """Feed Create Event"""
+        create_event = threading.Event()
+        def create_handler(feed):
+            self.assertEqual(feed, "test_notices")
+            create_event.set()
+        
+        self.ps.register_handler("create", create_handler)
+        l = self.ps.feed("test_notices")
+        create_event.wait(1)
+        self.assertTrue(create_event.isSet(), "Create notice not received")
+        self.ps.remove_handler("create", create_handler)
+        
+        """Feed Publish Event"""
+        publish_event = threading.Event()
         ids = [None, None]
         
         def received_handler(feed, item, id):
-            self.assertEqual(feed, "testfeed")
+            self.assertEqual(feed, "test_notices")
             ids[1] = id
-            notice_received[0] = True
+            publish_event.set()
         
-        self.ps.register_handler('publish_notice', received_handler)
-        j = self.ps.feed("testfeed")
-        time.sleep(1)
-        self.assertEqual(j.__class__, Feed)
-        self.assertFalse(notice_received[0])
-        
-        #publisher
-        ids[0] = j.publish('a')
-        
-        # block while waiting for notice
-        i = 0
-        while not notice_received[0] and i < 3:
-            i += 1
-            time.sleep(3)
+        self.ps.register_handler('publish', received_handler)
+        ids[0] = l.publish('a')
+        publish_event.wait(1)
 
-        self.assertTrue(notice_received[0], "Notice not received")
-        
+        self.assertTrue(publish_event.isSet(), "Publish notice not received")
         self.assertEqual(ids[1], ids[0])
+        self.ps.remove_handler('publish', received_handler)
         
-        self.ps.remove_handler('publish_notice', received_handler)
+        """Feed Edit Event """
+        edit_event = threading.Event()
+        def edit_handler(feed, item, id):
+            self.assertEqual(feed, "test_notices")
+            ids[1] = id
+            edit_event.set()
 
-    def test_10_job_notices(self):
+        self.ps.register_handler('edit', edit_handler)
+        l.publish('b', id=ids[0])
+        edit_event.wait(1)
+
+        self.assertTrue(edit_event.isSet(), "Edit notice not received")
+        self.assertEqual(ids[1], ids[0])
+        self.ps.remove_handler('edit', edit_handler)
+        
+        """Feed Retract Event"""
+        retract_event = threading.Event()
+        def retract_handler(feed, id):
+            self.assertEqual(feed, "test_notices")
+            ids[1] = id
+            retract_event.set()
+
+        self.ps.register_handler('retract', retract_handler)
+        l.retract(ids[0])
+        retract_event.wait(1)
+
+        self.assertTrue(retract_event.isSet(), "Retract notice not received")
+        self.assertEqual(ids[1], ids[0])
+        self.ps.remove_handler('retract', retract_handler)
+        
+        """Feed Delete Event"""
+        delete_event = threading.Event()
+        def delete_handler(feed):
+            self.assertEqual(feed, "test_notices")
+            delete_event.set()
+        
+        self.ps.register_handler("delete", delete_handler)
+        l.delete_feed()
+        delete_event.wait(1)
+        self.assertTrue(delete_event.isSet(), "Delete notice not received")
+        self.ps.remove_handler("delete", delete_handler)
+    
+    
+    def skiptest_10_job_notices(self):
         notices_received = [False]
         ids = [None, None]
         
@@ -95,7 +140,7 @@ class TestNotice(unittest.TestCase):
             i = 0
             while not notices_received[-1] and i < 2:
                 i += 1
-                time.sleep(1)
+                time.sleep(0.2)
         
         self.ps.register_handler('publish_notice', publish_handler)
         self.ps.register_handler('claimed_notice', claimed_handler)
@@ -106,8 +151,6 @@ class TestNotice(unittest.TestCase):
         
         j = self.ps.job("testjob")
         self.assertEqual(j.__class__, Job)
-        time.sleep(1) # wait for newfeed notice to propagate to listener
-        
         self.assertFalse(notices_received[0])
         
         # create the job

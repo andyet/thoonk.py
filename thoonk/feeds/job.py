@@ -5,20 +5,9 @@
 
 import time
 import uuid
-import redis
 
-from thoonk.exceptions import *
 from thoonk.feeds import Queue
 from thoonk.feeds.queue import Empty
-
-
-class JobDoesNotExist(Exception):
-    pass
-
-
-class JobNotPending(Exception):
-    pass
-
 
 class Job(Queue):
 
@@ -58,8 +47,9 @@ class Job(Queue):
         feed.claimed:[feed]   -- A hash table of claimed jobs.
         feed.stalled:[feed]   -- A hash table of stalled jobs.
         feed.running:[feed]   -- A hash table of running jobs.
-        feed.finished:[feed]\x00[id] -- Temporary queue for receiving job
-                                        result data.
+        feed.publishes:[feed] -- A count of the number of jobs published
+        feed.finishes:[feed]  -- A count of the number of jobs finished
+        job.finish:[feed]    -- A pubsub channel for job results
 
     Thoonk.py Implementation API:
         get_schemas   -- Return the set of Redis keys used by this feed.
@@ -77,7 +67,7 @@ class Job(Queue):
         stall       -- Pause execution of a queued job.
     """
 
-    def __init__(self, thoonk, feed, config=None):
+    def __init__(self, thoonk, feed):
         """
         Create a new Job queue object for a given Thoonk feed.
 
@@ -90,32 +80,30 @@ class Job(Queue):
             feed   -- The name of the feed.
             config -- Optional dictionary of configuration values.
         """
-        Queue.__init__(self, thoonk, feed, config=None)
+        Queue.__init__(self, thoonk, feed)
 
         self.feed_publishes = 'feed.publishes:%s' % feed
+        self.feed_published = 'feed.published:%s' % feed
         self.feed_cancelled = 'feed.cancelled:%s' % feed
         self.feed_retried = 'feed.retried:%s' % feed
-        self.feed_finished = 'feed.finished:%s' % feed
-        self.feed_job_claimed = 'feed.claimed:%s' % feed
-        self.feed_job_stalled = 'feed.stalled:%s' % feed
-        self.feed_job_finished = 'feed.finished:%s\x00%s' % (feed, '%s')
-        self.feed_job_running = 'feed.running:%s' % feed
+        self.feed_finishes = 'feed.finishes:%s' % feed
+        self.feed_claimed = 'feed.claimed:%s' % feed
+        self.feed_stalled = 'feed.stalled:%s' % feed
+        self.feed_running = 'feed.running:%s' % feed
+        
+        self.job_finish = 'job.finish:%s' % feed        
 
     def get_channels(self):
-        return (self.feed_publishes, self.feed_job_claimed, self.feed_job_stalled,
-            self.feed_finished, self.feed_cancelled, self.feed_retried)
+        return (self.feed_publishes, self.feed_claimed, self.feed_stalled,
+            self.feed_finishes, self.feed_cancelled, self.feed_retried)
 
     def get_schemas(self):
         """Return the set of Redis keys used exclusively by this feed."""
-        schema = set((self.feed_job_claimed,
-                      self.feed_job_stalled,
-                      self.feed_job_running,
+        schema = set((self.feed_claimed,
+                      self.feed_stalled,
+                      self.feed_running,
                       self.feed_publishes,
                       self.feed_cancelled))
-
-        for id in self.get_ids():
-            schema.add(self.feed_job_finished % id)
-        
         return schema.union(Queue.get_schemas(self))
 
     def get_ids(self):
@@ -134,11 +122,10 @@ class Job(Queue):
                 pipe.multi()
                 pipe.hdel(self.feed_items, id)
                 pipe.hdel(self.feed_cancelled, id)
-                pipe.zrem(self.feed_publishes, id)
-                pipe.srem(self.feed_job_stalled, id)
-                pipe.zrem(self.feed_job_claimed, id)
+                pipe.zrem(self.feed_published, id)
+                pipe.srem(self.feed_stalled, id)
+                pipe.zrem(self.feed_claimed, id)
                 pipe.lrem(self.feed_ids, 1, id)
-                pipe.delete(self.feed_job_finished % id)
         
         self.redis.transaction(_retract, self.feed_items)
 
@@ -161,9 +148,9 @@ class Job(Queue):
             pipe.rpush(self.feed_ids, id)
         else:
             pipe.lpush(self.feed_ids, id)
-            pipe.incr(self.feed_publishes)
+        pipe.incr(self.feed_publishes)
         pipe.hset(self.feed_items, id, item)
-        pipe.zadd(self.feed_publishes, **{id: time.time()})
+        pipe.zadd(self.feed_published, **{id: int(time.time()*1000)})
 
         results = pipe.execute()
 
@@ -196,56 +183,40 @@ class Job(Queue):
         id = id[1]
 
         pipe = self.redis.pipeline()
-        pipe.zadd(self.feed_job_claimed, **{id: time.time()})
+        pipe.zadd(self.feed_claimed, **{id: int(time.time()*1000)})
         pipe.hget(self.feed_items, id)
         pipe.hget(self.feed_cancelled, id)
         result = pipe.execute()
         
-        self.thoonk._publish(self.feed_job_claimed, (id,))
+        self.thoonk._publish(self.feed_claimed, (id,))
 
         return id, result[1], 0 if result[2] is None else int(result[2])
 
-    def finish(self, id, item=None, result=False, timeout=None):
+    def get_failure_count(self, id):
+        return int(self.redis.hget(self.feed_cancelled, id) or 0)
+    
+    NO_RESULT = []
+    def finish(self, id, result=NO_RESULT):
         """
         Mark a job as completed, and store any results.
 
         Arguments:
             id      -- The ID of the completed job.
-            item    -- The result data from the job.
-            result  -- Flag indicating that result data should be stored.
-                       Defaults to False.
-            timeout -- Time in seconds to keep the result data. The default
-                       is to store data indefinitely until retrieved.
+            result  -- The result data from the job. (should be a string!)
         """
         def _finish(pipe):
-            if pipe.zrank(self.feed_job_claimed, id) is None:
+            if pipe.zrank(self.feed_claimed, id) is None:
                 return # raise exception?
-            #query = pipe.hget(self.feed_items, id)
             pipe.multi()
-            pipe.zrem(self.feed_job_claimed, id)
+            pipe.zrem(self.feed_claimed, id)
             pipe.hdel(self.feed_cancelled, id)
-            if result:
-                pipe.lpush(self.feed_job_finished % id, item)
-                if timeout is not None:
-                    pipe.expire(self.feed_job_finished % id, timeout)
+            pipe.zrem(self.feed_published, id)
+            pipe.incr(self.feed_finishes)
+            if result is not self.NO_RESULT:
+                self.thoonk._publish(self.job_finish, (id, result), pipe)
             pipe.hdel(self.feed_items, id)
-            self.thoonk._publish(self.feed_finished, 
-                (id, item if result else ""), pipe)
         
-        self.redis.transaction(_finish, self.feed_job_claimed)
-
-    def get_result(self, id, timeout=0):
-        """
-        Retrieve the result of a given job.
-
-        Arguments:
-            id      -- The ID of the job to check for results.
-            timeout -- Time in seconds to wait for results to arrive.
-                       Default is to block indefinitely.
-        """
-        result = self.redis.brpop(self.feed_job_finished % id, timeout)
-        if result is not None:
-            return result
+        self.redis.transaction(_finish, self.feed_claimed)
 
     def cancel(self, id):
         """
@@ -255,15 +226,14 @@ class Job(Queue):
             id -- The ID of the job to cancel.
         """
         def _cancel(pipe):
-            if self.redis.zrank(self.feed_job_claimed, id) is None:
+            if self.redis.zrank(self.feed_claimed, id) is None:
                 return # raise exception?
             pipe.multi()
             pipe.hincrby(self.feed_cancelled, id, 1)
             pipe.lpush(self.feed_ids, id)
-            pipe.zrem(self.feed_job_claimed, id)
-            self.thoonk._publish(self.feed_cancelled, (id,), pipe)
+            pipe.zrem(self.feed_claimed, id)
         
-        self.redis.transaction(_cancel, self.feed_job_claimed)
+        self.redis.transaction(_cancel, self.feed_claimed)
 
     def stall(self, id):
         """
@@ -275,16 +245,15 @@ class Job(Queue):
             id -- The ID of the job to pause.
         """
         def _stall(pipe):
-            if pipe.zrank(self.feed_job_claimed, id) is None:
+            if pipe.zrank(self.feed_claimed, id) is None:
                 return # raise exception?
             pipe.multi()
-            pipe.zrem(self.feed_job_claimed, id)
+            pipe.zrem(self.feed_claimed, id)
             pipe.hdel(self.feed_cancelled, id)
-            pipe.sadd(self.feed_job_stalled, id)
-            pipe.zrem(self.feed_publishes, id)
-            self.thoonk._publish(self.feed_job_stalled, (id,), pipe)
+            pipe.sadd(self.feed_stalled, id)
+            pipe.zrem(self.feed_published, id)
         
-        self.redis.transaction(_stall, self.feed_job_claimed)
+        self.redis.transaction(_stall, self.feed_claimed)
 
     def retry(self, id):
         """
@@ -294,15 +263,14 @@ class Job(Queue):
             id -- The ID of the job to resume.
         """
         def _retry(pipe):
-            if pipe.sismember(self.feed_job_stalled, id) is None:
+            if pipe.sismember(self.feed_stalled, id) is None:
                 return # raise exception?
             pipe.multi()
-            pipe.srem(self.feed_job_stalled, id)
+            pipe.srem(self.feed_stalled, id)
             pipe.lpush(self.feed_ids, id)
-            pipe.zadd(self.feed_publishes, **{id: time.time()})
-            self.thoonk._publish(self.feed_retried, (id,), pipe)
+            pipe.zadd(self.feed_published, **{id: time.time()})
         
-        results = self.redis.transaction(_retry, self.feed_job_stalled)
+        results = self.redis.transaction(_retry, self.feed_stalled)
         if not results[0]:
             return # raise exception?
 
@@ -319,8 +287,8 @@ class Job(Queue):
         pipe = self.redis.pipeline()
         pipe.hkeys(self.feed_items)
         pipe.lrange(self.feed_ids)
-        pipe.zrange(self.feed_job_claimed, 0, -1)
-        pipe.stall = pipe.smembers(self.feed_job_stalled)
+        pipe.zrange(self.feed_claimed, 0, -1)
+        pipe.stall = pipe.smembers(self.feed_stalled)
 
         keys, avail, claim, stall = pipe.execute()
 

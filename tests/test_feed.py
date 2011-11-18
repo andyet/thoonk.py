@@ -2,7 +2,7 @@ import thoonk
 from thoonk.feeds import Feed
 import unittest
 from ConfigParser import ConfigParser
-
+import threading
 
 class TestLeaf(unittest.TestCase):
 
@@ -12,16 +12,20 @@ class TestLeaf(unittest.TestCase):
         if conf.sections() == ['Test']:
             self.ps = thoonk.Thoonk(host=conf.get('Test', 'host'),
                                     port=conf.getint('Test', 'port'),
-                                    db=conf.getint('Test', 'db'))
+                                    db=conf.getint('Test', 'db'),
+                                    listen=True)
             self.ps.redis.flushdb()
         else:
             print 'No test configuration found in test.cfg'
             exit()
-
+    
+    def tearDown(self):
+        self.ps.close()
+    
     def test_05_basic_retract(self):
         """Test adding and retracting an item."""
         l = self.ps.feed("testfeed")
-        self.assertTrue(isinstance(l, Feed))
+        self.assertEqual(type(l), Feed)
         l.publish('foo', id='1')
         r = l.get_ids()
         v = l.get_all()
@@ -76,6 +80,7 @@ class TestLeaf(unittest.TestCase):
         """Testing feed delete"""
         l = self.ps.feed("test2")
         l.delete_feed()
+        
 
     def test_50_max_length(self):
         """Test feeds with a max length"""

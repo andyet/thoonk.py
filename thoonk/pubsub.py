@@ -3,15 +3,12 @@
     Released under the terms of the MIT License
 """
 
-import json
 import redis
 import threading
 import uuid
 
-from thoonk import feeds
-from thoonk.exceptions import *
-from thoonk.config import ConfigCache
-
+from thoonk import feeds, cache
+from thoonk.exceptions import FeedExists, FeedDoesNotExist, NotListening
 
 class Thoonk(object):
 
@@ -40,7 +37,6 @@ class Thoonk(object):
     Attributes:
         db           -- The Redis database number.
         feeds        -- A set of known feed names.
-        _feed_config   -- A cache of feed configurations.
         feedtypes    -- A dictionary mapping feed type names to their
                         implementation classes.
         handlers     -- A dictionary mapping event names to event handlers.
@@ -85,32 +81,16 @@ class Thoonk(object):
         self.port = port
         self.db = db
         self.redis = redis.StrictRedis(host=self.host, port=self.port, db=self.db)
-        self.lredis = None
+        self._feeds = cache.FeedCache(self)
+        self.instance = uuid.uuid4().hex
 
         self.feedtypes = {}
-        self.feeds = set()
-        self._feed_config = ConfigCache(self)
-        self.handlers = {
-                'create_notice': [],
-                'delete_notice': [],
-                'publish_notice': [],
-                'retract_notice': [],
-                'position_notice': [],
-                'stalled_notice': [],
-                'retried_notice': [],
-                'finished_notice': [],
-                'claimed_notice': [],
-                'cancelled_notice': []}
 
-        self.listen_ready = threading.Event()
         self.listening = listen
 
         self.feed_publish = 'feed.publish:%s'
         self.feed_retract = 'feed.retract:%s'
         self.feed_config = 'feed.config:%s'
-        self.conf_feed = 'conffeed'
-        self.new_feed = 'newfeed'
-        self.del_feed = 'delfeed'
 
         self.register_feedtype(u'feed', feeds.Feed)
         self.register_feedtype(u'queue', feeds.Queue)
@@ -119,13 +99,11 @@ class Thoonk(object):
         self.register_feedtype(u'sorted_feed', feeds.SortedFeed)
 
         if listen:
-            #start listener thread
-            self.lthread = threading.Thread(target=self.listen)
-            self.lthread.daemon = True
-            self.lthread.start()
-            self.listen_ready.wait()
+            self.listener = ThoonkListener(self)
+            self.listener.start()
+            self.listener.ready.wait()
 
-    def _publish(self, schema, items, pipe=None):
+    def _publish(self, schema, items=[], pipe=None):
         """
         A shortcut method to publish items separated by \x00.
 
@@ -140,27 +118,6 @@ class Thoonk(object):
             pipe.publish(schema, "\x00".join(items))
         else:
             self.redis.publish(schema, "\x00".join(items))
-
-    def __getitem__(self, feed):
-        """
-        Return the configuration for a feed.
-
-        Arguments:
-            feed -- The name of the feed.
-
-        Returns: Dict
-        """
-        return self._feed_config[feed]
-
-    def __setitem__(self, feed, config):
-        """
-        Set the configuration for a feed.
-
-        Arguments:
-            feed   -- The name of the feed.
-            config -- A dict of config values.
-        """
-        self.set_config(feed, config)
 
     def register_feedtype(self, feedtype, klass):
         """
@@ -189,14 +146,225 @@ class Thoonk(object):
             """
             if config is None:
                 config = {}
-            if self.feed_exists(feed):
-                return self[feed]
-            else:
-                if not config.get('type', False):
-                    config['type'] = feedtype
-                return self.create_feed(feed, config)
+            config['type'] = feedtype
+            try:
+                self.create_feed(feed, config)
+            except FeedExists:
+                pass
+            return self._feeds[feed]
+                
 
         setattr(self, feedtype, startclass)
+    
+    def register_handler(self, name, handler):
+        """
+        Register a function to respond to feed events.
+
+        Event types:
+            - create_notice
+            - delete_notice
+            - publish_notice
+            - retract_notice
+            - position_notice
+
+        Arguments:
+            name    -- The name of the feed event.
+            handler -- The function for handling the event.
+        """
+        if self.listener:
+            self.listener.register_handler(name, handler)
+        else:
+            raise NotListening
+
+    def remove_handler(self, name, handler):
+        """
+        Unregister a function that was registered via register_handler
+
+        Arguments:
+            name    -- The name of the feed event.
+            handler -- The function for handling the event.
+        """
+        if self.listener:
+            self.listener.remove_handler(name, handler)
+        else:
+            raise NotListening
+    
+    def create_feed(self, feed, config):
+        """
+        Create a new feed with a given configuration.
+
+        The configuration is a dict, and should include a 'type'
+        entry with the class of the feed type implementation.
+
+        Arguments:
+            feed   -- The name of the new feed.
+            config -- A dictionary of configuration values.
+        """
+        if not self.redis.sadd("feeds", feed):
+            raise FeedExists
+        self.set_config(feed, config, True)
+
+    def delete_feed(self, feed):
+        """
+        Delete a given feed.
+
+        Arguments:
+            feed -- The name of the feed.
+        """
+        feed_instance = self._feeds[feed]
+        
+        def _delete_feed(pipe):
+            if not pipe.sismember('feeds', feed):
+                raise FeedDoesNotExist
+            pipe.multi()
+            pipe.srem("feeds", feed)
+            for key in feed_instance.get_schemas():
+                pipe.delete(key)
+            self._publish('delfeed', (feed, self.instance), pipe)
+
+        self.redis.transaction(_delete_feed, 'feeds')
+
+    def set_config(self, feed, config, new_feed=False):
+        """
+        Set the configuration for a given feed.
+
+        Arguments:
+            feed   -- The name of the feed.
+            config -- A dictionary of configuration values.
+        """
+        if not self.feed_exists(feed):
+            raise FeedDoesNotExist
+        if u'type' not in config:
+            config[u'type'] = u'feed'
+        pipe = self.redis.pipeline()
+        for k, v in config.iteritems():
+            pipe.hset('feed.config:' + feed, k, v)
+        pipe.execute()
+        if new_feed:
+            self._publish('newfeed', (feed, self.instance))
+        self._publish('conffeed', (feed, self.instance))
+
+    def get_feed_names(self):
+        """
+        Return the set of known feeds.
+
+        Returns: set
+        """
+        return self.redis.smembers('feeds') or set()
+
+    def feed_exists(self, feed):
+        """
+        Check if a given feed exists.
+
+        Arguments:
+            feed -- The name of the feed.
+        """
+        return self.redis.sismember('feeds', feed)
+
+    def close(self):
+        """Terminate the listening Redis connection."""
+        if self.listening:
+            self.redis.publish(self.listener._finish_channel, "")
+            self.listener.finished.wait()
+        self.redis.connection_pool.disconnect()
+
+
+class ThoonkListener(threading.Thread):
+    
+    def __init__(self, thoonk, *args, **kwargs):
+        threading.Thread.__init__(self, *args, **kwargs)
+        self.lock = threading.Lock()
+        self.handlers = {}
+        self.thoonk = thoonk
+        self.ready = threading.Event()
+        self.redis = redis.StrictRedis(host=thoonk.host, port=thoonk.port, db=thoonk.db)
+        self.finished = threading.Event()
+        self.instance = thoonk.instance
+        self._finish_channel = "listenerclose_%s" % self.instance
+        self._pubsub = None
+        self.daemon = True
+        
+    def finish(self):
+        self.redis.publish(self._finish_channel, "")
+    
+    def run(self):
+        """
+        Listen for feed creation and manipulation events and execute
+        relevant event handlers. Specifically, listen for:
+            - Feed creations
+            - Feed deletions
+            - Configuration changes
+            - Item publications.
+            - Item retractions.
+        """
+        # listener redis object
+        self._pubsub = self.redis.pubsub()
+        # subscribe to feed activities channel
+        self._pubsub.subscribe((self._finish_channel, 'newfeed', 'delfeed', 'conffeed'))
+
+        # subscribe to exist feeds retract and publish
+        for feed in self.redis.smembers("feeds"):
+            self._pubsub.subscribe(self.thoonk._feeds[feed].get_channels())
+
+        self.ready.set()
+        for event in self._pubsub.listen():
+            type = event.pop("type")
+            if event["channel"] == self._finish_channel:
+                if self._pubsub.subscription_count:
+                    self._pubsub.unsubscribe()
+            elif type == 'message':
+                self._handle_message(**event)
+            elif type == 'pmessage':
+                self._handle_pmessage(**event)
+        
+        self.finished.set()
+
+    def _handle_message(self, channel, data, pattern=None):
+        if channel == 'newfeed':
+            #feed created event
+            name, _ = data.split('\x00')
+            self._pubsub.subscribe(("feed.publish:"+name, "feed.edit:"+name,
+                "feed.retract:"+name, "feed.position:"+name, "job.finish:"+name))
+            self.emit("create", name)
+        
+        elif channel == 'delfeed':
+            #feed destroyed event
+            name, _ = data.split('\x00')
+            try:
+                del self._feeds[name]
+            except:
+                pass
+            self.emit("delete", name)
+        
+        elif channel == 'conffeed':
+            feed, _ = data.split('\x00', 1)
+            self.emit("config:"+feed, None)
+        
+        elif channel.startswith('feed.publish'):
+            #feed publish event
+            id, item = data.split('\x00', 1)
+            self.emit("publish", channel.split(':', 1)[-1], item, id)
+
+        elif channel.startswith('feed.edit'):
+            #feed publish event
+            id, item = data.split('\x00', 1)
+            self.emit("edit", channel.split(':', 1)[-1], item, id)
+        
+        elif channel.startswith('feed.retract'):
+            self.emit("retract", channel.split(':', 1)[-1], data)
+        
+        elif channel.startswith('feed.position'):
+            id, rel_id = data.split('\x00', 1)
+            self.emit("position", channel.split(':', 1)[-1], id, rel_id)
+
+        elif channel.startswith('job.finish'):
+            id, result = data.split('\x00', 1)
+            self.emit("finish", channel.split(':', 1)[-1], id, result)
+        
+    def emit(self, event, *args):
+        with self.lock:
+            for handler in self.handlers.get(event, []):
+                handler(*args)
 
     def register_handler(self, name, handler):
         """
@@ -213,9 +381,10 @@ class Thoonk(object):
             name    -- The name of the feed event.
             handler -- The function for handling the event.
         """
-        if name not in self.handlers:
-            self.handlers[name] = []
-        self.handlers[name].append(handler)
+        with self.lock:
+            if name not in self.handlers:
+                self.handlers[name] = []
+            self.handlers[name].append(handler)
 
     def remove_handler(self, name, handler):
         """
@@ -225,320 +394,8 @@ class Thoonk(object):
             name    -- The name of the feed event.
             handler -- The function for handling the event.
         """
-        try:
-            self.handlers[name].remove(handler)
-        except (KeyError, ValueError):
-            pass
-        
-
-    def create_feed(self, feed, config):
-        """
-        Create a new feed with a given configuration.
-
-        The configuration is a dict, and should include a 'type'
-        entry with the class of the feed type implementation.
-
-        Arguments:
-            feed   -- The name of the new feed.
-            config -- A dictionary of configuration values.
-        """
-        if config is None:
-            config = {}
-        if not self.redis.sadd("feeds", feed):
-            raise FeedExists
-        self.feeds.add(feed)
-        self.set_config(feed, config)
-        self._publish(self.new_feed, (feed, self._feed_config.instance))
-        return self[feed]
-
-    def delete_feed(self, feed):
-        """
-        Delete a given feed.
-
-        Arguments:
-            feed -- The name of the feed.
-        """
-        feed_instance = self._feed_config[feed]
-        
-        def _delete_feed(pipe):
-            if not pipe.sismember('feeds', feed):
-                raise FeedDoesNotExist
-            pipe.multi()
-            pipe.srem("feeds", feed)
-            for key in feed_instance.get_schemas():
-                pipe.delete(key)
-                self._publish(self.del_feed, (feed, self._feed_config.instance))
-
-        self.redis.transaction(_delete_feed, 'feeds')
-
-    def set_config(self, feed, config):
-        """
-        Set the configuration for a given feed.
-
-        Arguments:
-            feed   -- The name of the feed.
-            config -- A dictionary of configuration values.
-        """
-        if not self.feed_exists(feed):
-            raise FeedDoesNotExist
-        if type(config) == dict:
-            if u'type' not in config:
-                config[u'type'] = u'feed'
-            jconfig = json.dumps(config)
-            dconfig = config
-        else:
-            dconfig = json.loads(config)
-            if u'type' not in dconfig:
-                dconfig[u'type'] = u'feed'
-            jconfig = json.dumps(dconfig)
-        self.redis.set(self.feed_config % feed, jconfig)
-        self._publish(self.conf_feed, (feed, self._feed_config.instance))
-
-    def get_config(self, feed):
-        if not self.feed_exists(feed):
-            raise FeedDoesNotExist
-        config = self.redis.get(self.feed_config % feed)
-        return json.loads(config)
-
-    def get_feeds(self):
-        """
-        Return the set of known feeds.
-
-        Returns: set
-        """
-        self.feeds.update(self.redis.smembers('feeds'))
-        return self.feeds
-
-    def feed_exists(self, feed):
-        """
-        Check if a given feed exists.
-
-        Arguments:
-            feed -- The name of the feed.
-        """
-        return self.redis.sismember('feeds', feed)
-        if not self.listening:
-            if not feed in self.feeds:
-                if self.redis.sismember('feeds', feed):
-                    self.feeds.add(feed)
-                    return True
-                return False
-            else:
-                return True
-        return feed in self.feeds
-
-    def close(self):
-        """Terminate the listening Redis connection."""
-        self.redis.connection_pool.disconnect()
-
-    def listen(self):
-        """
-        Listen for feed creation and manipulation events and execute
-        relevant event handlers. Specifically, listen for:
-            - Feed creations
-            - Feed deletions
-            - Configuration changes
-            - Item publications.
-            - Item retractions.
-        """
-        # listener redis object
-        self.lredis = self.redis.pubsub()
-
-        # subscribe to feed activities channel
-        self.lredis.subscribe((self.new_feed, self.del_feed, self.conf_feed))
-
-        # get set of feeds
-        feeds = self.get_feeds()
-        # subscribe to exist feeds retract and publish
-        for feed in self.feeds:
-            self.lredis.subscribe(self[feed].get_channels())
-
-        self.listen_ready.set()
-        while True:
-            a = self.lredis.listen()
+        with self.lock:
             try:
-                event = a.next()
-            except:
-                break
-            if event['type'] == 'message':
-                if event['channel'].startswith('feed.publish'):
-                    #feed publish event
-                    id, item = event['data'].split('\x00', 1)
-                    self.publish_notice(event['channel'].split(':', 1)[-1],
-                                        item, id)
-                elif event['channel'].startswith('feed.retract'):
-                    self.retract_notice(event['channel'].split(':', 1)[-1],
-                                        event['data'])
-                elif event['channel'].startswith('feed.position'):
-                    id, rel_id = event['data'].split('\x00', 1)
-                    self.position_notice(event['channel'].split(':', 1)[-1],
-                                         id, rel_id)
-                elif event['channel'].startswith('feed.claimed'):
-                    self.claimed_notice(event['channel'].split(':', 1)[-1],
-                                        event['data'])
-                elif event['channel'].startswith('feed.finished'):
-                    id, data = event['data'].split(':', 1)[-1].split("\x00", 1)
-                    self.finished_notice(event['channel'].split(':', 1)[-1], id,
-                                        data)
-                elif event['channel'].startswith('feed.cancelled'):
-                    self.cancelled_notice(event['channel'].split(':', 1)[-1],
-                                        event['data'])
-                elif event['channel'].startswith('feed.stalled'):
-                    self.stalled_notice(event['channel'].split(':', 1)[-1],
-                                        event['data'])
-                elif event['channel'].startswith('feed.retried'):
-                    self.retried_notice(event['channel'].split(':', 1)[-1],
-                                        event['data'])
-                elif event['channel'] == self.new_feed:
-                    #feed created event
-                    name, instance = event['data'].split('\x00')
-                    self.feeds.add(name)
-                    config = self.get_config(name)
-                    if config["type"] == "job":
-                        self.lredis.subscribe(("feed.publishes:%s" % name,
-                                               "feed.cancelled:%s" % name,
-                                               "feed.claimed:%s" % name,
-                                               "feed.retried:%s" % name,
-                                               "feed.finished:%s" % name,
-                                               "feed.stalled:%s" % name,))
-                    else:
-                        self.lredis.subscribe((self.feed_publish % name,
-                                               self.feed_retract % name))
-                    self.create_notice(name)
-                elif event['channel'] == self.del_feed:
-                    #feed destroyed event
-                    name, instance = event['data'].split('\x00')
-                    try:
-                        self.feeds.remove(name)
-                    except KeyError:
-                        #already removed -- probably locally
-                        pass
-                    self._feed_config.invalidate(name, instance, delete=True)
-                    self.delete_notice(name)
-                elif event['channel'] == self.conf_feed:
-                    feed, instance = event['data'].split('\x00', 1)
-                    self._feed_config.invalidate(feed, instance)
-
-    def create_notice(self, feed):
-        """
-        Generate a notice that a new feed has been created and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed -- The name of the created feed.
-        """
-        for handler in self.handlers['create_notice']:
-            handler(feed)
-
-    def delete_notice(self, feed):
-        """
-        Generate a notice that a feed has been deleted, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed -- The name of the deleted feed.
-        """
-        for handler in self.handlers['delete_notice']:
-            handler(feed)
-
-    def publish_notice(self, feed, item, id):
-        """
-        Generate a notice that an item has been published to a feed, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed -- The name of the feed.
-            item -- The content of the published item.
-            id   -- The ID of the published item.
-        """
-        self[feed].event_publish(id, item)
-        for handler in self.handlers['publish_notice']:
-            handler(feed, item, id)
-
-    def retract_notice(self, feed, id):
-        """
-        Generate a notice that an item has been retracted from a feed, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed -- The name of the feed.
-            id   -- The ID of the retracted item.
-        """
-        self[feed].event_retract(id)
-        for handler in self.handlers['retract_notice']:
-            handler(feed, id)
-
-    def position_notice(self, feed, id, rel_id):
-        """
-        Generate a notice that an item has been moved, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed   -- The name of the feed.
-            id     -- The ID of the moved item.
-            rel_id -- Where the item was moved, in relation to
-                      existing items.
-        """
-        for handler in self.handlers['position_notice']:
-            handler(feed, id, rel_id)
-    
-    def stalled_notice(self, feed, id):
-        """
-        Generate a notice that a job has been stalled, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed   -- The name of the feed.
-            id     -- The ID of the stalled item.
-        """
-        for handler in self.handlers['stalled_notice']:
-            handler(feed, id)
-
-    def retried_notice(self, feed, id):
-        """
-        Generate a notice that a job has been retried, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed   -- The name of the feed.
-            id     -- The ID of the retried item.
-        """
-        for handler in self.handlers['retried_notice']:
-            handler(feed, id)
-
-    def cancelled_notice(self, feed, id):
-        """
-        Generate a notice that a job has been cancelled, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed   -- The name of the feed.
-            id     -- The ID of the stalled item.
-        """
-        for handler in self.handlers['cancelled_notice']:
-            handler(feed, id)
-
-    def finished_notice(self, feed, id, result):
-        """
-        Generate a notice that a job has finished, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed   -- The name of the feed.
-            id     -- The ID of the stalled item.
-        """
-        for handler in self.handlers['finished_notice']:
-            handler(feed, id, result)
-
-    def claimed_notice(self, feed, id):
-        """
-        Generate a notice that a job has been claimed, and
-        execute any relevant event handlers.
-
-        Arguments:
-            feed   -- The name of the feed.
-            id     -- The ID of the stalled item.
-        """
-        for handler in self.handlers['claimed_notice']:
-            handler(feed, id)
-        
+                self.handlers[name].remove(handler)
+            except (KeyError, ValueError):
+                pass
