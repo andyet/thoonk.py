@@ -87,6 +87,7 @@ class Thoonk(object):
         self.feedtypes = {}
 
         self.listening = listen
+        self.listener = None
 
         self.feed_publish = 'feed.publish:%s'
         self.feed_retract = 'feed.retract:%s'
@@ -111,7 +112,7 @@ class Thoonk(object):
             schema -- The key to publish the items to.
             items  -- A tuple or list of items to publish.
             pipe   -- A redis pipeline to use to publish the item using.
-                      Note: it is up to the caller to execute the pipe after 
+                      Note: it is up to the caller to execute the pipe after
                       publishing
         """
         if pipe:
@@ -152,10 +153,10 @@ class Thoonk(object):
             except FeedExists:
                 pass
             return self._feeds[feed]
-                
+
 
         setattr(self, feedtype, startclass)
-    
+
     def register_handler(self, name, handler):
         """
         Register a function to respond to feed events.
@@ -188,7 +189,7 @@ class Thoonk(object):
             self.listener.remove_handler(name, handler)
         else:
             raise NotListening
-    
+
     def create_feed(self, feed, config):
         """
         Create a new feed with a given configuration.
@@ -212,7 +213,7 @@ class Thoonk(object):
             feed -- The name of the feed.
         """
         feed_instance = self._feeds[feed]
-        
+
         def _delete_feed(pipe):
             if not pipe.sismember('feeds', feed):
                 raise FeedDoesNotExist
@@ -270,7 +271,7 @@ class Thoonk(object):
 
 
 class ThoonkListener(threading.Thread):
-    
+
     def __init__(self, thoonk, *args, **kwargs):
         threading.Thread.__init__(self, *args, **kwargs)
         self.lock = threading.Lock()
@@ -283,10 +284,10 @@ class ThoonkListener(threading.Thread):
         self._finish_channel = "listenerclose_%s" % self.instance
         self._pubsub = None
         self.daemon = True
-        
+
     def finish(self):
         self.redis.publish(self._finish_channel, "")
-    
+
     def run(self):
         """
         Listen for feed creation and manipulation events and execute
@@ -316,7 +317,7 @@ class ThoonkListener(threading.Thread):
                 self._handle_message(**event)
             elif type == 'pmessage':
                 self._handle_pmessage(**event)
-        
+
         self.finished.set()
 
     def _handle_message(self, channel, data, pattern=None):
@@ -326,7 +327,7 @@ class ThoonkListener(threading.Thread):
             self._pubsub.subscribe(("feed.publish:"+name, "feed.edit:"+name,
                 "feed.retract:"+name, "feed.position:"+name, "job.finish:"+name))
             self.emit("create", name)
-        
+
         elif channel == 'delfeed':
             #feed destroyed event
             name, _ = data.split('\x00')
@@ -335,11 +336,11 @@ class ThoonkListener(threading.Thread):
             except:
                 pass
             self.emit("delete", name)
-        
+
         elif channel == 'conffeed':
             feed, _ = data.split('\x00', 1)
             self.emit("config:"+feed, None)
-        
+
         elif channel.startswith('feed.publish'):
             #feed publish event
             id, item = data.split('\x00', 1)
@@ -349,10 +350,10 @@ class ThoonkListener(threading.Thread):
             #feed publish event
             id, item = data.split('\x00', 1)
             self.emit("edit", channel.split(':', 1)[-1], item, id)
-        
+
         elif channel.startswith('feed.retract'):
             self.emit("retract", channel.split(':', 1)[-1], data)
-        
+
         elif channel.startswith('feed.position'):
             id, rel_id = data.split('\x00', 1)
             self.emit("position", channel.split(':', 1)[-1], id, rel_id)
@@ -360,7 +361,7 @@ class ThoonkListener(threading.Thread):
         elif channel.startswith('job.finish'):
             id, result = data.split('\x00', 1)
             self.emit("finish", channel.split(':', 1)[-1], id, result)
-        
+
     def emit(self, event, *args):
         with self.lock:
             for handler in self.handlers.get(event, []):
