@@ -95,7 +95,8 @@ class Job(Queue):
 
     def get_channels(self):
         return (self.feed_publishes, self.feed_claimed, self.feed_stalled,
-            self.feed_finishes, self.feed_cancelled, self.feed_retried)
+            self.feed_finishes, self.feed_cancelled, self.feed_retried,
+            self.job_finish)
 
     def get_schemas(self):
         """Return the set of Redis keys used exclusively by this feed."""

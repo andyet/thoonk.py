@@ -83,7 +83,7 @@ class Feed(object):
         """
         Return the Redis key channels for publishing and retracting items.
         """
-        return (self.feed_publish, self.feed_retract)
+        return (self.feed_publish, self.feed_retract, self.feed_edit)
 
     def event_publish(self, id, value):
         """
