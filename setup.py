@@ -51,6 +51,6 @@ setup(
     packages     = packages,
     scripts      = ['scripts/thoonk-cli'],
     py_modules   = [],
-    requires     = [],
+    requires     = ['redis'],
     )
 
