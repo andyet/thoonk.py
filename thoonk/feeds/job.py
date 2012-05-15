@@ -287,7 +287,7 @@ class Job(Queue):
         """
         pipe = self.redis.pipeline()
         pipe.hkeys(self.feed_items)
-        pipe.lrange(self.feed_ids)
+        pipe.lrange(self.feed_ids, 0, -1)
         pipe.zrange(self.feed_claimed, 0, -1)
         pipe.stall = pipe.smembers(self.feed_stalled)
 
