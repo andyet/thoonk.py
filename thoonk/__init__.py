@@ -3,8 +3,10 @@
     Released under the terms of the MIT License
 """
 
-from pubsub import Thoonk
-from pubsub import Thoonk as Pubsub
+from thoonk.core import Thoonk, ThoonkObject
+from thoonk.feed import Feed
+from thoonk.deck import Deck
+from thoonk.job import Job
 
-__version__ = '1.0.0rc1a'
-__version_info__ = (1, 0, 0, 'rc1a', 0)
+__version__ = '2.0.0'
+__version_info__ = (2, 0, 0, '', 0)

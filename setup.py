@@ -25,7 +25,7 @@ import sys
 #
 # from setuptools import setup, find_packages, Extension, Feature
 
-VERSION          = '1.0.1.0'
+VERSION = '1.0.1.0'
 DESCRIPTION      = 'Thoonk is a clusterable, Redis based, Publish-Subscribe, Queue, and Job Distrubtion system based on the philosophies of XMPP Pubsub (XEP-0060).'
 LONG_DESCRIPTION      = 'Thoonk is a clusterable, Redis based, Publish-Subscribe, Queue, and Job Distrubtion system based on the philosophies of XMPP Pubsub (XEP-0060).'
 
@@ -35,7 +35,7 @@ CLASSIFIERS      = [ 'Intended Audience :: Developers',
                      'Topic :: Software Development :: Libraries :: Python Modules',
                    ]
 
-packages     = [ 'thoonk', 'thoonk/feeds' ]
+packages     = [ 'thoonk' ]
 
 
 setup(
@@ -49,8 +49,7 @@ setup(
     license      = 'MIT',
     platforms    = [ 'any' ],
     packages     = packages,
-    scripts      = ['scripts/thoonk-cli'],
     py_modules   = [],
     requires     = ['redis'],
-    )
+)
 
