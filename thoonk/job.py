@@ -8,20 +8,22 @@ from thoonk import ThoonkObject
 class Job(ThoonkObject):
 
     TYPE = 'job'
-    SCRIPT_DIR = './scripts/job/'
+    PACKAGE = 'thoonk'
+    SCRIPT_DIR = 'scripts/job/'
     SUBSCRIBABLES = ['finish']
 
     def __init__(self, name, thoonk):
         super(Job, self).__init__(name, thoonk)
+        self.run_script('create', [json.dumps({})])
 
     def cancel(self, id):
         return self.run_script('cancel', [self.name, id])
 
     def config(self, data):
-        return self.run_script('config', [self.name, json.tostring(data)])
+        return self.run_script('config', [self.name, json.dumps(data)])
 
     def create(self, config):
-        return self.run_script('create', [self.name, json.tostring(config)])
+        return self.run_script('create', [self.name, json.dumps(config)])
 
     def finish(self, id, result=None):
         return self.run_script('finish', [self.name, id, result])

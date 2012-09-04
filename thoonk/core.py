@@ -4,6 +4,8 @@ import redis
 import threading
 import uuid
 
+from pkg_resources import resource_listdir, resource_string
+
 
 class EventEmitter(object):
 
@@ -68,6 +70,7 @@ class EventEmitter(object):
 class ThoonkObject(EventEmitter):
 
     TYPE = ''
+    PACKAGE = 'thoonk'
     SCRIPT_DIR = ''
     SUBSCRIBABLES = []
 
@@ -96,19 +99,34 @@ class ThoonkObject(EventEmitter):
             self.subscription_inited = True
 
     def run_script(self, name, args):
-        return self.thoonk._run_script(self.TYPE, name, self.name, args)
+        result = self.thoonk._run_script(self.TYPE, name, self.name, args)
+        if result[0]:
+            raise RuntimeError(result[0])
+        if len(result) == 2:
+            return result[1]
+        return result[1:]
+
+    @classmethod
+    def get_scripts(self):
+        scripts = {}
+        for name in resource_listdir(self.PACKAGE, self.SCRIPT_DIR):
+            if name.endswith('.lua'):
+                script = resource_string(self.PACKAGE, '%s/%s' % (self.SCRIPT_DIR, name))
+                if script:
+                    scripts[name[0:-4]] = script
+        return scripts
 
 
 class Thoonk(EventEmitter):
 
-    def __init__(self, host=None, port=None, db=None, listen=None):
+    def __init__(self, host='localhost', port=6379, db=0):
         super(Thoonk, self).__init__()
         self.scripts = {}
         self.objects = {}
         self.shas = {}
         self.instance = uuid.uuid4()
         self.subscriptions = {}
-        self.redis = redis.StrictRedis()
+        self.redis = redis.StrictRedis(host=host, port=port, db=db)
         self.lredis = self.redis.pubsub()
 
         self.lredis.psubscribe('event.*')
@@ -125,25 +143,20 @@ class Thoonk(EventEmitter):
 
     def register_type(self, obj):
         self.objects[obj.TYPE] = obj
-        self.scripts[obj.TYPE] = {}
+        self.scripts[obj.TYPE] = obj.get_scripts()
+        self.shas[obj.TYPE] = {}
 
-        for filename in glob.glob(os.path.join(obj.SCRIPT_DIR, '*.lua')):
-            basename = os.path.basename(filename)
-            if basename.endswith('.lua'):
-                verb = basename[0:-4]
-                script = open(filename).read()
-                self.scripts[obj.TYPE][verb] = script
-                sha = self.redis.execute_command('SCRIPT', 'LOAD', script)
-                if obj.TYPE not in self.shas:
-                    self.shas[obj.TYPE] = {}
-                self.shas[obj.TYPE][verb] = sha
-                self.emit('loaded.%s' % obj.TYPE)
+        for name, script in self.scripts[obj.TYPE].items():
+            sha = self.redis.execute_command('SCRIPT', 'LOAD', script)
+            self.shas[obj.TYPE][name] = sha
+
+        self.emit('loaded.%s' % obj.TYPE)
 
     def create(self, obj_type, name):
         obj_class = self.objects.get(obj_type, None)
         if obj_class is None:
             raise ValueError('Unknown thoonk object type: %s' % obj_type)
-        return obj_classs(name, self)
+        return obj_class(name, self)
 
     def _run_script(self, obj_type, script, feed, args):
         eargs = ['0', feed]
@@ -152,8 +165,9 @@ class Thoonk(EventEmitter):
         return self.redis.execute_command('EVALSHA', sha, *eargs)
 
     def _listen(self):
-        #r = self.lredis.parse_response()
-
-        for event in self.lredis.listen():
-            print event
-            self.emit(event['channel'], event['channel'], event['data'])
+        try:
+            for event in self.lredis.listen():
+                self.emit(event['channel'], event['channel'], event['data'])
+        except AttributeError:
+            # It's possible to get this exception after calling quit()
+            pass
