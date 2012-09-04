@@ -10,7 +10,7 @@ if max then
         end
     end
 end
-local isnew = redis.call('zadd', 'feed.ids:'..ARGV[1], ARGV[4], ARGV[2]);
+local isnew = redis.call('zadd', 'feed.ids:'..ARGV[1], ARGV[4], ARGV[2]) == 1;
 redis.call('incr', 'feed.publishes:'..ARGV[1]);
 redis.call('hset', 'feed.items:'..ARGV[1], ARGV[2], ARGV[3]);
 if isnew then
