@@ -311,7 +311,10 @@ class ThoonkListener(threading.Thread):
         for event in self._pubsub.listen():
             type = event.pop("type")
             if event["channel"] == self._finish_channel:
-                if self._pubsub.subscription_count:
+                # For compatibility with older and newer versions of redis-py
+                is_subscribed = getattr(self._pubsub, 'subscription_count',
+                                        getattr(self._pubsub, 'subscribed', False))
+                if is_subscribed:
                     self._pubsub.unsubscribe()
             elif type == 'message':
                 self._handle_message(**event)
