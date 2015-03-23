@@ -65,7 +65,7 @@ class Thoonk(object):
         set_config        -- Set the configuration for a given feed.
     """
 
-    def __init__(self, host='localhost', port=6379, db=0, listen=False):
+    def __init__(self, host='localhost', port=6379, db=0, listen=False, password=None):
         """
         Start a new Thoonk instance for creating and managing feeds.
 
@@ -80,7 +80,7 @@ class Thoonk(object):
         self.host = host
         self.port = port
         self.db = db
-        self.redis = redis.StrictRedis(host=self.host, port=self.port, db=self.db)
+        self.redis = redis.StrictRedis(host=self.host, port=self.port, db=self.db, password=password)
         self._feeds = cache.FeedCache(self)
         self.instance = uuid.uuid4().hex
 
